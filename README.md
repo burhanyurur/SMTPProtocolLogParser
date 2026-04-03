@@ -46,6 +46,10 @@ C:\Program Files\Microsoft\Exchange Server\V15\TransportRoles\Logs\FrontEnd\Prot
 Files are plain CSV with a `#` comment header block at the top. The tool handles the header automatically.
 
 ## Views
+<p style="text-align: center"><img src="https://raw.githubusercontent.com/burhanyurur/SMTPProtocolLogParser/refs/heads/main/main.png"></p>
+
+
+
 
 **Sessions tab** - tree grouped by connector, then session, then individual emails. Clicking a session or email loads the raw log entries into the grid on the right.
 
@@ -62,6 +66,8 @@ Files are plain CSV with a `#` comment header block at the top. The tool handles
 **Search** - filter sessions by sender IP, sender address, recipient, or session ID.
 
 ## Export
+<p style="text-align: center"><img src="https://raw.githubusercontent.com/burhanyurur/SMTPProtocolLogParser/refs/heads/main/htmlexport.jpg"></p>
+
 
 File > Export HTML Report generates a self-contained HTML file with the summary, charts, and session tables. No external CSS or JavaScript - the whole report is one file.
 
