@@ -1,5 +1,7 @@
-# SMTP Protocol Log Parser
+# SMTP Protocol Log Parser 
 
+![Cloud Vision]([image-url](https://www.cloudvision.com.tr/images/Logo/CV.png))
+[Cloud Vision](www.cloudvision.com.tr)
 A Windows GUI tool for reading and analyzing Exchange Server SMTP Receive protocol logs. Built entirely in PowerShell 5.1 with no external dependencies - just run the script.
 
 ## What it does
