@@ -1,7 +1,6 @@
 # <p style="text-align:center;">SMTP Protocol Log Parser</p> 
 
-![Cloud Vision]([[image-url](https://www.cloudvision.com.tr/images/Logo/CV.png)])
-
+<p style="text-align: center"><img src="[https://files.document360.io/filename/folder/subfolder/imagename.png](https://www.cloudvision.com.tr/images/Logo/CV.png))"></p>
 
 Cloud Vision](www.cloudvision.com.tr)
 
