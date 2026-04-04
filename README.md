@@ -1,4 +1,4 @@
-# <p style="text-align:center;">SMTP Protocol Log Parser</p> 
+# <p style="text-align:center;">SMTP Protocol Log Parser v2</p> 
 
 <p style="text-align: center"><img src="https://www.cloudvision.com.tr/images/Logo/CV.png"></p>
 
@@ -6,6 +6,11 @@
 
 
 A Windows GUI tool for reading and analyzing Exchange Server SMTP Receive protocol logs. Built entirely in PowerShell 5.1 with no external dependencies - just run the script.
+
+
+## Updated to v2 04.04.2026
+
+Added SMTP Size sections and fixed Powershell direct calling. Also statistics are updated with more details .
 
 ## What it does
 
@@ -26,9 +31,14 @@ A few things it handles that make it actually useful:
 ## How to run
 
 ```
-powershell.exe -File ProtocolLogParser.ps1
+powershell.exe -File ProtocolLogParser.ps1   
 ```
 
+or direct run with(in v2)
+
+```
+.\PrototolLogParser.ps1
+```
 Or right-click the file in Explorer and choose "Run with PowerShell". If you get a script execution policy error, run this first:
 
 ```
