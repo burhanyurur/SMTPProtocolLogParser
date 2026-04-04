@@ -1,4 +1,4 @@
-﻿<#
+<#
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -9,21 +9,57 @@ SOFTWARE.
 #>
 
 <#
-SMTP Protocol Log Parser v1.0 - Initial release
+SMTP Protocol Log Parser v2.0
 - Parses SMTP protocol logs from Microsoft Exchange Server and generates an HTML report with detailed analysis and statistics
 - Provides a GUI for selecting log files, viewing parsed data, and exporting reports
 - Developed by CloudVision (https://www.cloudvision.com.tr)
 #>
 #Requires -Version 5.1
+
+$script:ScriptPath = $PSCommandPath
+$script:ScriptRoot = if ($PSScriptRoot) {
+    $PSScriptRoot
+} elseif ($script:ScriptPath) {
+    Split-Path -Parent $script:ScriptPath
+} else {
+    (Get-Location).Path
+}
+
+function Export-ScriptFunctionsToGlobal {
+    $sourceFile = $PSCommandPath
+    foreach ($cmd in Get-Command -CommandType Function) {
+        if ($cmd.Name -eq 'Export-ScriptFunctionsToGlobal') { continue }
+        if ($null -eq $cmd.ScriptBlock) { continue }
+        if ($cmd.ScriptBlock.File -ne $sourceFile) { continue }
+        Set-Item -Path ("function:global:{0}" -f $cmd.Name) -Value $cmd.ScriptBlock
+    }
+}
+
+if ($Host.Name -eq 'ConsoleHost' -and [System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
+    $powershellExe = Join-Path $PSHOME 'powershell.exe'
+    if (Test-Path -LiteralPath $powershellExe) {
+        Start-Process -FilePath $powershellExe -WorkingDirectory $script:ScriptRoot -ArgumentList @(
+            '-NoProfile'
+            '-ExecutionPolicy'
+            'Bypass'
+            '-STA'
+            '-File'
+            $script:ScriptPath
+        )
+        return
+    }
+
+    throw 'This script requires STA. Start it with Windows PowerShell 5.1 or powershell.exe -STA -File.'
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-
 # ================================================================
 #  GLOBAL STATE
 # ================================================================
 $Global:Sessions = [System.Collections.Hashtable]::Synchronized(@{})
-$Global:LogPath  = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) `
-                              ("ProtocolLogParser_" + (Get-Date -Format "yyyyMMdd") + ".log")
+$Global:LogPath  = Join-Path $script:ScriptRoot `
+                              ("ProtocolLogparser_" + (Get-Date -Format "yyyyMMdd") + ".log")
 $Global:ActiveParseTimer = $null
 $Global:ActiveParseState = $null
 $Global:LogoBase64 = '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 '
@@ -97,6 +133,7 @@ function New-Session {
         ErrorCode      = ''
         ErrorMessage   = ''
         HasMail        = $false
+        TotalSizeBytes = 0
         Mails          = [System.Collections.Generic.List[hashtable]]::new()
         Entries        = [System.Collections.Generic.List[hashtable]]::new()
         EhloHost       = ''
@@ -110,6 +147,8 @@ function New-MailObject {
         SenderAddress = ''
         Recipients    = [System.Collections.Generic.List[string]]::new()
         MessageId     = ''
+        SizeBytes     = 0
+        StartTime     = ''
         StartSeq      = $StartSeq
         EndSeq        = -1
         Status        = 'Incomplete'
@@ -236,6 +275,8 @@ function ProcessProtocolLogLine {
                     $senderaddress = $Matches[1].Trim()
                     $mail   = New-MailObject ([int]$f[3])
                     $mail.SenderAddress = $senderaddress
+                    if ($data -match '(?i)\bSIZE=(\d+)\b') { $mail.SizeBytes = [int64]$Matches[1] }
+                    $mail.StartTime = $dt
                     $s.Mails.Add($mail)
                     $s.HasMail = $true
                     if ($s.SenderAddress -eq '') { $s.SenderAddress = $senderaddress }
@@ -295,6 +336,7 @@ function FinalizeParsedSessions {
     param([hashtable]$Sessions)
 
     foreach ($s in $Sessions.Values) {
+        $s.TotalSizeBytes = 0
         # Set EndSeq and status for each mail object
         for ($i = 0; $i -lt $s.Mails.Count; $i++) {
             $m = $s.Mails[$i]
@@ -304,6 +346,7 @@ function FinalizeParsedSessions {
                 $m.EndSeq = [int]$s.Entries[$s.Entries.Count - 1].SequenceNumber
             }
             if ($m.Status -eq 'Incomplete' -and $m.MessageId -ne '') { $m.Status = 'OK' }
+            if ($m.SizeBytes -gt 0) { $s.TotalSizeBytes += [int64]$m.SizeBytes }
         }
         if ($s.Status -eq 'Complete' -and $s.SenderAddress -ne '' -and $s.ErrorCode -eq '') {
             $s.Status = 'OK'
@@ -516,6 +559,12 @@ function ParseLogFiles {
                         '<' {
                             if      ($data -match '(?i)^MAIL FROM:\s*<?([^>]+)>?')  {
                                 $s.SenderAddress = $Matches[1].Trim(); $s.HasMail = $true
+                                if ($s.Mails.Count -gt 0 -and $s.Mails[$s.Mails.Count - 1].SizeBytes -eq 0 -and $data -match '(?i)\bSIZE=(\d+)\b') {
+                                    $s.Mails[$s.Mails.Count - 1].SizeBytes = [int64]$Matches[1]
+                                }
+                                if ($s.Mails.Count -gt 0 -and $s.Mails[$s.Mails.Count - 1].StartTime -eq '') {
+                                    $s.Mails[$s.Mails.Count - 1].StartTime = $dt
+                                }
                             }
                             elseif  ($data -match '(?i)^RCPT TO:\s*<?([^>]+)>?')    {
                                 $s.Recipients.Add($Matches[1].Trim())
@@ -572,26 +621,33 @@ function ParseLogFiles {
 # ================================================================
 function Get-Statistics {
     param($Sessions)
-    $senders  = @{}; $receivers = @{}; $errors = @{}; $byHour = @{}
+    $senders  = @{}; $receivers = @{}; $errors = @{}; $byHour = @{}; $sizeByHour = @{}; $mailCountByHour = @{}
     $status   = @{ OK=0; Error=0; Incomplete=0; Complete=0 }
     $ehloHosts   = @{}
     $tlsProtocols = @{}
     $tlsCiphers  = @{}
     $tlsCount    = 0
     $noTlsCount  = 0
+    $totalMails  = 0
+    $totalMailBytes = [int64]0
+
+    $inputFilesBySize = @()
+    $totalInputBytes = [int64]0
+    if ($Global:LoadedFilesMeta -is [System.Array] -and $Global:LoadedFilesMeta.Count -gt 0) {
+        $inputFilesBySize = @(
+            $Global:LoadedFilesMeta | Sort-Object Value -Desc | Select-Object -First 10
+        )
+        foreach ($f in $Global:LoadedFilesMeta) {
+            if ($null -ne $f.Value) { $totalInputBytes += [int64]$f.Value }
+        }
+    } elseif ($Global:LoadedInputBytes -is [int64] -and $Global:LoadedInputBytes -gt 0) {
+        $totalInputBytes = [int64]$Global:LoadedInputBytes
+    }
 
     foreach ($s in $Sessions.Values) {
         $k = $s.Status
         if ($status.ContainsKey($k)) { $status[$k]++ }
 
-        if ($s.SenderAddress -ne '') {
-            if (-not $senders[$s.SenderAddress]) { $senders[$s.SenderAddress] = 0 }
-            $senders[$s.SenderAddress]++
-        }
-        foreach ($r in $s.Recipients) {
-            if (-not $receivers[$r]) { $receivers[$r] = 0 }
-            $receivers[$r]++
-        }
         if ($s.ErrorCode -ne '') {
             $ek = "$($s.ErrorCode) - $($s.ErrorMessage.Substring(0,[Math]::Min(50,$s.ErrorMessage.Length)))"
             if (-not $errors[$ek]) { $errors[$ek] = 0 }
@@ -601,6 +657,36 @@ function Get-Statistics {
             $hr = $s.StartTime.Substring(11,2) + ':00'
             if (-not $byHour[$hr]) { $byHour[$hr] = 0 }
             $byHour[$hr]++
+        }
+
+        foreach ($mail in $s.Mails) {
+            $totalMails++
+            $mailSize = [int64]$mail.SizeBytes
+            $totalMailBytes += $mailSize
+
+            if ($null -ne $mail.StartTime -and $mail.StartTime -ne '' -and $mail.StartTime.Length -ge 13) {
+                $hr = $mail.StartTime.Substring(11,2) + ':00'
+                if (-not $mailCountByHour[$hr]) { $mailCountByHour[$hr] = 0 }
+                $mailCountByHour[$hr]++
+                if (-not $sizeByHour[$hr]) { $sizeByHour[$hr] = [int64]0 }
+                $sizeByHour[$hr] += $mailSize
+            }
+
+            if ($mail.SenderAddress -ne '') {
+                if (-not $senders.ContainsKey($mail.SenderAddress)) {
+                    $senders[$mail.SenderAddress] = @{ Count = 0; Bytes = [int64]0 }
+                }
+                $senders[$mail.SenderAddress].Count++
+                $senders[$mail.SenderAddress].Bytes += $mailSize
+            }
+
+            foreach ($r in $mail.Recipients) {
+                if (-not $receivers.ContainsKey($r)) {
+                    $receivers[$r] = @{ Count = 0; Bytes = [int64]0 }
+                }
+                $receivers[$r].Count++
+                $receivers[$r].Bytes += $mailSize
+            }
         }
 
         # EHLO hosts
@@ -625,14 +711,44 @@ function Get-Statistics {
             $noTlsCount++
         }
     }
+
+    $senderRows = @(
+        $senders.GetEnumerator() | Sort-Object { $_.Value.Bytes } -Descending | Select-Object -First 10 | ForEach-Object {
+            [PSCustomObject]@{ Key = $_.Key; Value = [int64]$_.Value.Bytes; Count = [int64]$_.Value.Count; Bytes = [int64]$_.Value.Bytes }
+        }
+    )
+    $senderCountRows = @(
+        $senders.GetEnumerator() | Sort-Object { $_.Value.Count } -Descending | Select-Object -First 10 | ForEach-Object {
+            [PSCustomObject]@{ Key = $_.Key; Value = [int64]$_.Value.Count; Count = [int64]$_.Value.Count; Bytes = [int64]$_.Value.Bytes }
+        }
+    )
+
+    $receiverRows = @(
+        $receivers.GetEnumerator() | Sort-Object { $_.Value.Bytes } -Descending | Select-Object -First 10 | ForEach-Object {
+            [PSCustomObject]@{ Key = $_.Key; Value = [int64]$_.Value.Bytes; Count = [int64]$_.Value.Count; Bytes = [int64]$_.Value.Bytes }
+        }
+    )
+    $receiverCountRows = @(
+        $receivers.GetEnumerator() | Sort-Object { $_.Value.Count } -Descending | Select-Object -First 10 | ForEach-Object {
+            [PSCustomObject]@{ Key = $_.Key; Value = [int64]$_.Value.Count; Count = [int64]$_.Value.Count; Bytes = [int64]$_.Value.Bytes }
+        }
+    )
+
     return @{
-        TopSenders    = ($senders.GetEnumerator()    | Sort-Object Value -Desc | Select-Object -First 10)
-        TopReceivers  = ($receivers.GetEnumerator()   | Sort-Object Value -Desc | Select-Object -First 10)
+        TopSenders    = $senderRows
+        TopSendersByCount = $senderCountRows
+        TopReceivers  = $receiverRows
+        TopReceiversByCount = $receiverCountRows
         TopErrors     = ($errors.GetEnumerator()      | Sort-Object Value -Desc | Select-Object -First 10)
         ByHour        = ($byHour.GetEnumerator()      | Sort-Object Key)
+        MailCountByHour = ($mailCountByHour.GetEnumerator() | Sort-Object Key)
+        SizeByHour    = ($sizeByHour.GetEnumerator()  | Sort-Object Key)
         StatusCounts  = $status
         TotalSessions = $Sessions.Count
-        TotalMails    = ($Sessions.Values | Where-Object { $_.HasMail } | Measure-Object).Count
+        TotalMails    = $totalMails
+        TotalMailBytes = $totalMailBytes
+        TotalInputBytes = $totalInputBytes
+        InputFilesBySize = $inputFilesBySize
         TopEhloHosts  = ($ehloHosts.GetEnumerator()   | Sort-Object Value -Desc | Select-Object -First 15)
         TlsCount      = $tlsCount
         NoTlsCount    = $noTlsCount
@@ -794,127 +910,188 @@ function HtmlEncode {
     $s.Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;')
 }
 
+function Format-ByteSize {
+    param([Int64]$Bytes)
+    if ($Bytes -lt 1000) { return "$Bytes B" }
+    if ($Bytes -lt 1000000) { return ('{0:N1} KB' -f ($Bytes / 1000.0)) }
+    if ($Bytes -lt 1000000000) { return ('{0:N1} MB' -f ($Bytes / 1000000.0)) }
+    if ($Bytes -lt 1000000000000) { return ('{0:N1} GB' -f ($Bytes / 1000000000.0)) }
+    return ('{0:N1} TB' -f ($Bytes / 1000000000000.0))
+}
+
 function Export-HtmlReport {
     param([string]$OutputPath, $Sessions, $Stats)
 
     $sb = [System.Text.StringBuilder]::new()
-    [void]$sb.Append('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SMTP Protocol Log Parser v1.0 Report</title><style>
-body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;background:#f5f5f5;color:#222}
-h1{background:#1a3a5c;color:#fff;padding:12px 22px;margin:0;font-size:20px}
-h2{color:#1a3a5c;border-bottom:2px solid #1a3a5c;padding-bottom:3px;margin-top:28px}
-.container{padding:20px 28px}
-table{border-collapse:collapse;width:100%;margin-bottom:20px}
-th{background:#1a3a5c;color:#fff;padding:7px 10px;text-align:left;font-weight:600}
-td{padding:5px 10px;border-bottom:1px solid #ddd;vertical-align:top}
-tr:nth-child(even) td{background:#f0f4fa}
-tr:hover td{background:#dce8f8}
-.sb{display:inline-block;background:#fff;border:1px solid #ccc;border-radius:6px;
-    padding:12px 20px;margin:6px;text-align:center;min-width:110px;box-shadow:0 1px 3px #0001}
-.sn{font-size:28px;font-weight:bold;color:#1a3a5c}
-.sl{font-size:11px;color:#666;margin-top:2px}
-.charts{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:20px}
-img.chart{border:1px solid #ccc;border-radius:4px;background:#fff}
+    [void]$sb.Append(@'
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SMTP Protocol Log Parser v2.0 Report</title>
+<style>
+:root{
+    --bg:#eef2f7;
+    --panel:#ffffff;
+    --ink:#1f2937;
+    --muted:#6b7280;
+    --brand:#163a5f;
+    --brand2:#1f6f8b;
+    --line:#d7dee8;
+    --shadow:0 10px 30px rgba(16,24,40,.08);
+}
+*{box-sizing:border-box}
+body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;background:linear-gradient(180deg,#f8fafc 0%,var(--bg) 100%);color:var(--ink)}
+a{color:#1b6d9b;text-decoration:none}
+.hero{background:linear-gradient(135deg,var(--brand) 0%,#11314f 45%,#0f4c5c 100%);color:#fff;padding:22px 28px;box-shadow:var(--shadow)}
+.hero-inner{display:flex;align-items:center;justify-content:space-between;gap:18px;max-width:1480px;margin:0 auto}
+.hero h1{margin:0;font-size:26px;letter-spacing:.2px}
+.hero p{margin:6px 0 0;color:rgba(255,255,255,.8)}
+.hero .logo{height:48px;flex:0 0 auto}
+.container{max-width:1480px;margin:0 auto;padding:18px 18px 24px}
+.section{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:14px;margin-bottom:14px}
+.section h2{margin:0 0 10px;color:var(--brand);font-size:18px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.metric{background:linear-gradient(180deg,#fff 0%,#f8fbff 100%);border:1px solid var(--line);border-radius:14px;padding:14px 12px;text-align:center}
+.metric .value{font-size:26px;font-weight:700;color:var(--brand);line-height:1.05}
+.metric .label{margin-top:4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(720px,1fr));gap:10px}
+.chart-card,.table-card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.chart-card{padding:8px;display:flex;justify-content:center;align-items:center}
+.chart-card img{display:block;width:auto;max-width:100%;height:auto;border-radius:10px}
+.table-card h3{margin:0;padding:10px 12px;background:linear-gradient(180deg,#f7fbff 0%,#eef5fb 100%);border-bottom:1px solid var(--line);font-size:14px;color:var(--brand)}
+table{border-collapse:collapse;width:100%}
+th{background:#173b5c;color:#fff;padding:9px 10px;text-align:left;font-weight:600;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #edf2f7;vertical-align:top}
+tbody tr:nth-child(even) td{background:#f8fbfe}
+tbody tr:hover td{background:#eaf2fb}
+.table-wrap{overflow-x:auto}
+.table-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:10px}
 .ok{color:#2a7a2a;font-weight:600}.er{color:#c0392b;font-weight:600}.ic{color:#d35400;font-weight:600}
-.hdr{display:flex;align-items:center;justify-content:space-between;background:#1a3a5c;padding:8px 22px}
-.hdr h1{color:#fff;font-size:20px;margin:0}
-.hdr img{height:44px}
-.ftr{text-align:center;padding:18px;color:#888;font-size:11px;border-top:1px solid #ddd;margin-top:20px}
-.ftr a{color:#1a6a9a;text-decoration:none}
-</style></head><body>')
+.footer{padding:18px 0 8px;color:var(--muted);font-size:11px;text-align:center}
+.footer a{text-decoration:none}
+</style>
+</head>
+<body>
+'@)
     $logoB64Html = $Global:LogoBase64
-    [void]$sb.Append("<div class='hdr'><h1>SMTP Protocol Log - Analysis Report</h1><a href='https://www.cloudvision.com.tr'><img src='data:image/png;base64,$logoB64Html' />></a>)</div><div class='container'>")
+    [void]$sb.Append("<div class='hero'><div class='hero-inner'><div><h1>SMTP Protocol Log - Analysis Report</h1><p>Interactive summary of sessions, mail flow, errors, TLS, and throughput.</p></div><a href='https://www.cloudvision.com.tr'><img class='logo' src='data:image/png;base64,$logoB64Html' alt='CloudVision' /></a></div></div><div class='container'>")
 
     # summary
-    [void]$sb.Append('<h2>Summary</h2><div>')
+    [void]$sb.Append("<section class='section'><h2>Summary</h2><div class='metrics'>")
     $boxes = @(
         @{L='Total Sessions'; V=$Stats.TotalSessions},
         @{L='Emails (MAIL FROM)'; V=$Stats.TotalMails},
+        @{L='Total Mail Size'; V=(Format-ByteSize ([int64]$Stats.TotalMailBytes))},
+        @{L='Total Input Size'; V=(Format-ByteSize ([int64]$Stats.TotalInputBytes))},
         @{L='OK'; V=$Stats.StatusCounts.OK},
         @{L='Errors'; V=$Stats.StatusCounts.Error},
         @{L='Incomplete'; V=$Stats.StatusCounts.Incomplete}
     )
     foreach ($b in $boxes) {
-        [void]$sb.Append("<div class='sb'><div class='sn'>$($b.V)</div><div class='sl'>$($b.L)</div></div>")
+        [void]$sb.Append("<div class='metric'><div class='value'>$($b.V)</div><div class='label'>$($b.L)</div></div>")
     }
     [void]$sb.Append('</div>')
 
+    $mailHourArr = if ($Stats.MailCountByHour) { $Stats.MailCountByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} } } else { @() }
+    $tlsTotal = $Stats.TlsCount + $Stats.NoTlsCount
+    $tlsPct   = if ($tlsTotal -gt 0) { [int](($Stats.TlsCount / $tlsTotal) * 100) } else { 0 }
+
+    [void]$sb.Append("<section class='section'><h2>Top Sender and Recipient Activity</h2><div class='table-grid'>")
+    [void]$sb.Append("<article class='table-card'><h3>Top Senders by Email Count</h3><div class='table-wrap'><table><thead><tr><th>Sender</th><th>Email Count</th><th>Total Size</th><th>Avg Size</th></tr></thead><tbody>")
+    foreach ($kv in $Stats.TopSendersByCount) {
+        $avg = if ($kv.Count -gt 0) { [int64]([math]::Round(([double]$kv.Bytes / [double]$kv.Count), 0)) } else { [int64]0 }
+        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Count)</td><td>$(Format-ByteSize ([int64]$kv.Bytes))</td><td>$(Format-ByteSize $avg)</td></tr>")
+    }
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>Top Recipients by Email Count</h3><div class='table-wrap'><table><thead><tr><th>Recipient</th><th>Email Count</th><th>Total Size</th><th>Avg Size</th></tr></thead><tbody>")
+    foreach ($kv in $Stats.TopReceiversByCount) {
+        $avg = if ($kv.Count -gt 0) { [int64]([math]::Round(([double]$kv.Bytes / [double]$kv.Count), 0)) } else { [int64]0 }
+        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Count)</td><td>$(Format-ByteSize ([int64]$kv.Bytes))</td><td>$(Format-ByteSize $avg)</td></tr>")
+    }
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("</div></section>")
+
     # charts
-    [void]$sb.Append('<h2>Statistics</h2><div class="charts">')
-    $c1 = New-BarChart 'Top Senders'    $Stats.TopSenders    -Width 660 -Height 310
-    $c2 = New-BarChart 'Top Recipients' $Stats.TopReceivers   -Width 660 -Height 310 -BarColor ([System.Drawing.Color]::SeaGreen)
-    $c3 = New-BarChart 'Top Errors'     $Stats.TopErrors      -Width 660 -Height 310 -BarColor ([System.Drawing.Color]::Tomato)
+    [void]$sb.Append("<section class='section'><h2>Statistics</h2><div class='chart-grid'>")
+    $inputRows = if ($Stats.InputFilesBySize -and $Stats.InputFilesBySize.Count -gt 0) {
+        $Stats.InputFilesBySize
+    } else { @() }
+    $mailHourArr = if ($Stats.MailCountByHour) { $Stats.MailCountByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} } } else { @() }
+    $c0 = New-BarChart 'Input Files by Size' $inputRows -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::Chocolate)
+    $c1 = New-BarChart 'Top Senders by Size'    $Stats.TopSenders    -Width 700 -Height 290
+    $c2 = New-BarChart 'Top Recipients by Size'  $Stats.TopReceivers  -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::SeaGreen)
+    $c3 = New-BarChart 'Top Errors'     $Stats.TopErrors      -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::Tomato)
+    $c3b = New-BarChart 'Mail Count by Hour' $mailHourArr -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::MediumSeaGreen)
     $hourArr = $Stats.ByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} }
-    $c4 = New-BarChart 'Sessions by Hour' $hourArr            -Width 760 -Height 310 -BarColor ([System.Drawing.Color]::DarkSlateBlue)
+    $c4 = New-BarChart 'Sessions by Hour' $hourArr            -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::DarkSlateBlue)
+    $sizeHourArr = $Stats.SizeByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} }
+    $c4b = New-BarChart 'Mail Size by Hour' $sizeHourArr       -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::DarkGoldenrod)
     $sd  = @{}; foreach ($kv in $Stats.StatusCounts.GetEnumerator()) { if ($kv.Value -gt 0) { $sd[$kv.Key] = $kv.Value } }
-    $c5 = New-PieChart 'Session Status Distribution' $sd      -Width 480 -Height 310
-    $c6 = New-BarChart 'Top EHLO Hosts (by session count)' $Stats.TopEhloHosts -Width 760 -Height 310 -BarColor ([System.Drawing.Color]::CadetBlue)
+    $c5 = New-PieChart 'Session Status Distribution' $sd      -Width 430 -Height 290
+    $c6 = New-BarChart 'Top EHLO Hosts (by session count)' $Stats.TopEhloHosts -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::CadetBlue)
     $tlsPieData = @{}
     if ($Stats.TlsCount -gt 0)   { $tlsPieData['TLS'] = $Stats.TlsCount }
     if ($Stats.NoTlsCount -gt 0) { $tlsPieData['No TLS'] = $Stats.NoTlsCount }
-    $c7 = New-PieChart 'TLS Usage' $tlsPieData -Width 480 -Height 310
+    $c7 = New-PieChart 'TLS Usage' $tlsPieData -Width 430 -Height 290
     $tlsProtoArr = $Stats.TlsProtocols.GetEnumerator() | Sort-Object Value -Desc | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} }
-    $c8 = New-BarChart 'TLS Protocol Versions' $tlsProtoArr  -Width 560 -Height 310 -BarColor ([System.Drawing.Color]::DarkCyan)
-    $c9 = New-BarChart 'Top TLS Cipher Suites' $Stats.TopTlsCiphers -Width 760 -Height 310 -BarColor ([System.Drawing.Color]::SlateBlue)
-    foreach ($c in @($c1,$c2,$c3,$c4,$c5,$c6,$c7,$c8,$c9)) {
-        [void]$sb.Append("<img class='chart' src='data:image/png;base64,$(BitmapToBase64 $c)' />")
+    $c8 = New-BarChart 'TLS Protocol Versions' $tlsProtoArr  -Width 560 -Height 290 -BarColor ([System.Drawing.Color]::DarkCyan)
+    $c9 = New-BarChart 'Top TLS Cipher Suites' $Stats.TopTlsCiphers -Width 700 -Height 290 -BarColor ([System.Drawing.Color]::SlateBlue)
+    foreach ($c in @($c0,$c1,$c2,$c3,$c3b,$c4,$c4b,$c5,$c6,$c7,$c8,$c9)) {
+        [void]$sb.Append("<div class='chart-card'><img class='chart' src='data:image/png;base64,$(BitmapToBase64 $c)' alt='chart' /></div>")
         $c.Dispose()
     }
     [void]$sb.Append('</div>')
 
-    # top senders table
-    [void]$sb.Append('<h2>Top Senders</h2><table><tr><th>Sender</th><th>Count</th></tr>')
-    foreach ($kv in $Stats.TopSenders) {
+    [void]$sb.Append("<h2>Hourly and Operational Tables</h2><div class='table-grid'>")
+    [void]$sb.Append("<article class='table-card'><h3>Email Count by Hour</h3><div class='table-wrap'><table><thead><tr><th>Hour</th><th>Emails</th></tr></thead><tbody>")
+    foreach ($kv in $mailHourArr) {
         [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
     }
-    [void]$sb.Append('</table>')
-
-    # top receivers table
-    [void]$sb.Append('<h2>Top Recipients</h2><table><tr><th>Recipient</th><th>Count</th></tr>')
-    foreach ($kv in $Stats.TopReceivers) {
-        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>Mail Size by Hour</h3><div class='table-wrap'><table><thead><tr><th>Hour</th><th>Bytes</th></tr></thead><tbody>")
+    foreach ($kv in $sizeHourArr) {
+        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$(Format-ByteSize ([int64]$kv.Value))</td></tr>")
     }
-    [void]$sb.Append('</table>')
-
-    # errors table
-    [void]$sb.Append('<h2>Error Summary</h2><table><tr><th>Error</th><th>Count</th></tr>')
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>Error Summary</h3><div class='table-wrap'><table><thead><tr><th>Error</th><th>Count</th></tr></thead><tbody>")
     foreach ($kv in $Stats.TopErrors) {
         [void]$sb.Append("<tr><td class='er'>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
     }
-    [void]$sb.Append('</table>')
-
-    # EHLO hosts table
-    [void]$sb.Append('<h2>Top EHLO Hosts</h2><table><tr><th>EHLO Hostname</th><th>Sessions</th></tr>')
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>Top EHLO Hosts</h3><div class='table-wrap'><table><thead><tr><th>EHLO Hostname</th><th>Sessions</th></tr></thead><tbody>")
     foreach ($kv in $Stats.TopEhloHosts) {
         [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
     }
-    [void]$sb.Append('</table>')
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("</div>")
 
-    # TLS summary table
-    $tlsTotal = $Stats.TlsCount + $Stats.NoTlsCount
-    $tlsPct   = if ($tlsTotal -gt 0) { [int](($Stats.TlsCount / $tlsTotal) * 100) } else { 0 }
-    [void]$sb.Append('<h2>TLS Summary</h2><table><tr><th>Metric</th><th>Value</th></tr>')
+    [void]$sb.Append("<h2>TLS Summary</h2><div class='table-grid'>")
+    [void]$sb.Append("<article class='table-card'><h3>High-level TLS</h3><div class='table-wrap'><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>")
     [void]$sb.Append("<tr><td>Sessions with TLS</td><td>$($Stats.TlsCount) ($tlsPct%)</td></tr>")
     [void]$sb.Append("<tr><td>Sessions without TLS</td><td>$($Stats.NoTlsCount)</td></tr>")
-    [void]$sb.Append('</table>')
-
-    if ($Stats.TlsProtocols.Count -gt 0) {
-        [void]$sb.Append('<table><tr><th>TLS Protocol</th><th>Sessions</th></tr>')
-        foreach ($kv in ($Stats.TlsProtocols.GetEnumerator() | Sort-Object Value -Desc)) {
-            [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
-        }
-        [void]$sb.Append('</table>')
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>TLS Protocol Versions</h3><div class='table-wrap'><table><thead><tr><th>Protocol</th><th>Sessions</th></tr></thead><tbody>")
+    foreach ($kv in ($Stats.TlsProtocols.GetEnumerator() | Sort-Object Value -Desc)) {
+        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
     }
-
-    if ($Stats.TopTlsCiphers.Count -gt 0) {
-        [void]$sb.Append('<table><tr><th>Cipher Suite</th><th>Sessions</th></tr>')
-        foreach ($kv in $Stats.TopTlsCiphers) {
-            [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
-        }
-        [void]$sb.Append('</table>')
+    [void]$sb.Append("</tbody></table></div></article>")
+    [void]$sb.Append("<article class='table-card'><h3>TLS Cipher Suites</h3><div class='table-wrap'><table><thead><tr><th>Cipher Suite</th><th>Sessions</th></tr></thead><tbody>")
+    foreach ($kv in $Stats.TopTlsCiphers) {
+        [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$($kv.Value)</td></tr>")
     }
+    [void]$sb.Append("</tbody></table></div></article>")
+    if ($Stats.InputFilesBySize -and $Stats.InputFilesBySize.Count -gt 0) {
+        [void]$sb.Append("<article class='table-card'><h3>Input Files by Size</h3><div class='table-wrap'><table><thead><tr><th>File</th><th>Bytes</th></tr></thead><tbody>")
+        foreach ($kv in $Stats.InputFilesBySize) {
+            [void]$sb.Append("<tr><td>$(HtmlEncode $kv.Key)</td><td>$(Format-ByteSize ([int64]$kv.Value))</td></tr>")
+        }
+        [void]$sb.Append("</tbody></table></div></article>")
+    }
+    [void]$sb.Append("</div></section>")
 
     # sessions table
-    [void]$sb.Append('<h2>All Sessions</h2><table><tr><th>Session ID</th><th>Connector</th><th>Remote IP</th><th>Start</th><th>EHLO Host</th><th>TLS</th><th>Sender</th><th>Recipients</th><th>Status</th><th>Error</th></tr>')
+    [void]$sb.Append("<section class='section'><h2>All Sessions</h2><div class='table-wrap'><table><thead><tr><th>Session ID</th><th>Connector</th><th>Remote IP</th><th>Start</th><th>EHLO Host</th><th>TLS</th><th>Sender</th><th>Recipients</th><th>Mail Size</th><th>Status</th><th>Error</th></tr></thead><tbody>")
     foreach ($s in ($Sessions.Values | Sort-Object { $_.StartTime })) {
         $cls     = switch ($s.Status) { 'OK' {'ok'} 'Error' {'er'} default {'ic'} }
         $ip      = if ($s.RemoteEndpoint -match '^(.+):\d+$') { $Matches[1] } else { $s.RemoteEndpoint }
@@ -923,9 +1100,10 @@ img.chart{border:1px solid #ccc;border-radius:4px;background:#fff}
             "<span style='color:#2a7a2a;font-weight:600'>$proto</span>"
         } else { "<span style='color:#888'>No</span>" }
         $ehloCell = HtmlEncode ($(if ($s.EhloHost -ne '') { $s.EhloHost } else { '' }))
-        [void]$sb.Append("<tr><td>$($s.SessionId)</td><td>$(HtmlEncode $s.ConnectorId)</td><td>$ip</td><td>$($s.StartTime)</td><td>$ehloCell</td><td>$tlsCell</td><td>$(HtmlEncode $s.SenderAddress)</td><td>$(HtmlEncode ($s.Recipients -join '; '))</td><td class='$cls'>$($s.Status)</td><td class='er'>$(HtmlEncode $s.ErrorCode)</td></tr>")
+        [void]$sb.Append("<tr><td>$($s.SessionId)</td><td>$(HtmlEncode $s.ConnectorId)</td><td>$ip</td><td>$($s.StartTime)</td><td>$ehloCell</td><td>$tlsCell</td><td>$(HtmlEncode $s.SenderAddress)</td><td>$(HtmlEncode ($s.Recipients -join '; '))</td><td>$(Format-ByteSize ([int64]$s.TotalSizeBytes))</td><td class='$cls'>$($s.Status)</td><td class='er'>$(HtmlEncode $s.ErrorCode)</td></tr>")
     }
-    [void]$sb.Append('</table></div></body></html>')
+    [void]$sb.Append("</tbody></table></div></section>")
+    [void]$sb.Append("<div class='footer'>Generated by SMTP Protocol Log Parser v2.0 - <a href='https://www.cloudvision.com.tr'>cloudvision.com.tr</a></div></div></body></html>")
 
     [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), [System.Text.Encoding]::UTF8)
 }
@@ -962,7 +1140,8 @@ function PopulateTreeView {
         foreach ($s in ($groups[$conn] | Sort-Object { $_.StartTime })) {
             $ip      = Get-RemoteIP $s.RemoteEndpoint
             $mailCnt = if ($s.Mails.Count -gt 0) { "  [$($s.Mails.Count) mail(s)]" } else { '' }
-            $sn      = [System.Windows.Forms.TreeNode]::new("$($s.SessionId)  [$ip]  $($s.StartTime)  [$($s.Status)]$mailCnt")
+            $sizeTxt = if ($s.TotalSizeBytes -gt 0) { "  [" + (Format-ByteSize ([int64]$s.TotalSizeBytes)) + "]" } else { '' }
+            $sn      = [System.Windows.Forms.TreeNode]::new("$($s.SessionId)  [$ip]  $($s.StartTime)  [$($s.Status)]$mailCnt$sizeTxt")
             $sn.Tag  = @{ Type='Session'; Session=$s }
             $sn.ForeColor = switch ($s.Status) {
                 'Error'      { [System.Drawing.Color]::Firebrick }
@@ -971,7 +1150,8 @@ function PopulateTreeView {
             }
             foreach ($mail in $s.Mails) {
                 $rcpts = if ($mail.Recipients.Count -gt 0) { $mail.Recipients -join ', ' } else { '(no recipients)' }
-                $mn = [System.Windows.Forms.TreeNode]::new("$($mail.SenderAddress) -> $rcpts")
+                $sizeTxt = "  [" + (Format-ByteSize ([int64]$mail.SizeBytes)) + "]"
+                $mn = [System.Windows.Forms.TreeNode]::new("$($mail.SenderAddress) -> $rcpts$sizeTxt")
                 $mn.Tag = @{ Type='Mail'; Session=$s; Mail=$mail }
                 $mn.ForeColor = switch ($mail.Status) {
                     'Error'      { [System.Drawing.Color]::Firebrick }
@@ -1130,14 +1310,14 @@ function PopulateGridConnector {
     param($Global:grid, $Sessions, [string]$ConnId)
     $Global:grid.Rows.Clear()
     Set-GridCols $Global:grid `
-        @('Session-ID','Remote IP','Start Time','End Time','Sender','Recipients','Status','Error','Error Message') `
-        @(140,110,145,145,160,200,75,65,200)
+        @('Session-ID','Remote IP','Start Time','End Time','Sender','Recipients','Mail Size','Status','Error','Error Message') `
+        @(140,110,145,145,160,200,95,75,65,200)
     $rows = $Sessions.Values | Where-Object { $null -eq $ConnId -or $_.ConnectorId -eq $ConnId }
     foreach ($s in ($rows | Sort-Object { $_.StartTime })) {
         $ri = $Global:grid.Rows.Add($s.SessionId, (Get-RemoteIP $s.RemoteEndpoint), $s.StartTime,
-              $s.EndTime, $s.SenderAddress, ($s.Recipients -join '; '),
+              $s.EndTime, $s.SenderAddress, ($s.Recipients -join '; '), (Format-ByteSize ([int64]$s.TotalSizeBytes)),
               $s.Status, $s.ErrorCode, $s.ErrorMessage)
-        $Global:grid.Rows[$ri].Tag = $s
+        $Global:grid.Rows[$ri].Tag = @{ Type='Session'; Session=$s }
         $Global:grid.Rows[$ri].DefaultCellStyle.BackColor = switch ($s.Status) {
             'Error'      { [System.Drawing.Color]::FromArgb(255,235,235) }
             'Incomplete' { [System.Drawing.Color]::FromArgb(255,250,225) }
@@ -1152,6 +1332,7 @@ function PopulateGridSession {
     Set-GridCols $Global:grid @('Seq#','Time','Event','Data','Context') @(50,145,50,440,200)
     foreach ($e in $Session.Entries) {
         $ri = $Global:grid.Rows.Add($e.SequenceNumber, $e.DateTime, $e.Event, $e.Data, $e.Context)
+        $Global:grid.Rows[$ri].Tag = @{ Type='Session'; Session=$Session }
         $Global:grid.Rows[$ri].DefaultCellStyle.BackColor = switch ($e.Event) {
             '+' { [System.Drawing.Color]::FromArgb(225,255,225) }
             '-' { [System.Drawing.Color]::FromArgb(255,225,225) }
@@ -1174,6 +1355,7 @@ function PopulateGridMail {
             if ($Mail.EndSeq -ge 0 -and $seq -gt $Mail.EndSeq) { continue }
         }
         $ri = $Global:grid.Rows.Add($e.SequenceNumber, $e.DateTime, $e.Event, $e.Data, $e.Context)
+        $Global:grid.Rows[$ri].Tag = if ($null -ne $Mail) { @{ Type='Mail'; Session=$Session; Mail=$Mail } } else { @{ Type='Session'; Session=$Session } }
         $Global:grid.Rows[$ri].DefaultCellStyle.BackColor = switch ($e.Event) {
             '+' { [System.Drawing.Color]::FromArgb(225,255,225) }
             '-' { [System.Drawing.Color]::FromArgb(255,225,225) }
@@ -1224,60 +1406,233 @@ function Update-DetailPanel {
     $RTB.Text = $lines -join "`r`n"
 }
 
+function Find-SessionTreeNode {
+    param($TreeView, $SessionOrTag)
+    if ($null -eq $TreeView -or $null -eq $SessionOrTag) { return $null }
+    $session = $SessionOrTag
+    if ($SessionOrTag -is [hashtable] -and $SessionOrTag.ContainsKey('Session')) {
+        $session = $SessionOrTag.Session
+    } elseif ($SessionOrTag.PSObject.Properties.Name -contains 'Session') {
+        $session = $SessionOrTag.Session
+    }
+    if ($null -eq $session -or $null -eq $session.SessionId) { return $null }
+    foreach ($cn in $TreeView.Nodes) {
+        foreach ($sn in $cn.Nodes) {
+            $t = $sn.Tag
+            if ($null -ne $t -and $t.Type -eq 'Session' -and $t.Session.SessionId -eq $session.SessionId) {
+                return $sn
+            }
+        }
+    }
+    return $null
+}
+
+function Show-TreeNodeInProtocolGrid {
+    param($TreeView, $Node, $Grid, $Sessions, $DetailRtb = $null)
+    if ($null -eq $Node -or $null -eq $Node.Tag) { return }
+    if ($null -ne $Global:UI_tabs -and $Global:UI_tabs.SelectedTab -ne $Global:UI_tabProto) {
+        $Global:UI_tabs.SelectedTab = $Global:UI_tabProto
+    }
+    $tag = $Node.Tag
+    switch ($tag.Type) {
+        'Connector' {
+            PopulateGridConnector $Grid $Sessions $tag.ConnectorId
+            if ($null -ne $DetailRtb) { $DetailRtb.Clear() }
+        }
+        'Session' {
+            PopulateGridSession $Grid $tag.Session
+            if ($null -ne $DetailRtb) { $DetailRtb.Clear() }
+        }
+        'Mail' {
+            PopulateGridMail $Grid $tag.Session $tag.Mail
+            if ($null -ne $DetailRtb) { $DetailRtb.Clear() }
+        }
+    }
+}
+
 function Build-StatsTab {
     param($Panel, $Stats)
     $Panel.Controls.Clear()
+    $root = [System.Windows.Forms.FlowLayoutPanel]::new()
+    $root.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $root.AutoScroll = $true
+    $root.FlowDirection = [System.Windows.Forms.FlowDirection]::TopDown
+    $root.WrapContents = $false
+    $root.Padding = [System.Windows.Forms.Padding]::new(10,10,10,10)
+
+    $contentWidth = [Math]::Max(1200, $Panel.ClientSize.Width - 40)
 
     $flow = [System.Windows.Forms.FlowLayoutPanel]::new()
-    $flow.Dock = [System.Windows.Forms.DockStyle]::Top; $flow.Height = 76
-    $flow.Padding = [System.Windows.Forms.Padding]::new(8,6,0,0)
+    $flow.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+    $flow.WrapContents = $true
+    $flow.AutoSize = $true
+    $flow.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $flow.Width = $contentWidth
+    $flow.Margin = [System.Windows.Forms.Padding]::new(0,0,0,12)
     $sumItems = @(
         @{L='Total Sessions';    V=$Stats.TotalSessions},
-        @{L='Emails (MAIL FROM)';V=$Stats.TotalMails},
-        @{L='OK';                V=$Stats.StatusCounts.OK},
-        @{L='Errors';            V=$Stats.StatusCounts.Error},
-        @{L='Incomplete';        V=$Stats.StatusCounts.Incomplete}
+        @{L='Emails (MAIL FROM)'; V=$Stats.TotalMails},
+        @{L='Total Mail Size';    V=(Format-ByteSize ([int64]$Stats.TotalMailBytes))},
+        @{L='Total Input Size';   V=(Format-ByteSize ([int64]$Stats.TotalInputBytes))},
+        @{L='OK';                 V=$Stats.StatusCounts.OK},
+        @{L='Errors';             V=$Stats.StatusCounts.Error},
+        @{L='Incomplete';         V=$Stats.StatusCounts.Incomplete}
     )
     foreach ($item in $sumItems) {
-        $gb  = [System.Windows.Forms.GroupBox]::new(); $gb.Text=$item.L; $gb.Width=120; $gb.Height=60
+        $gb  = [System.Windows.Forms.GroupBox]::new()
+        $gb.Text = $item.L
+        $gb.Width = 162
+        $gb.Height = 70
+        $gb.Margin = [System.Windows.Forms.Padding]::new(4)
         $lbl = [System.Windows.Forms.Label]::new()
         $lbl.Text = $item.V.ToString()
         $lbl.Font = [System.Drawing.Font]::new('Segoe UI',16,[System.Drawing.FontStyle]::Bold)
         $lbl.ForeColor = [System.Drawing.Color]::DarkBlue
         $lbl.Dock = [System.Windows.Forms.DockStyle]::Fill
         $lbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-        $gb.Controls.Add($lbl); [void]$flow.Controls.Add($gb)
+        $gb.Controls.Add($lbl)
+        [void]$flow.Controls.Add($gb)
     }
-    [void]$Panel.Controls.Add($flow)
+    [void]$root.Controls.Add($flow)
 
-    $scroll = [System.Windows.Forms.Panel]::new()
-    $scroll.Dock = [System.Windows.Forms.DockStyle]::Fill
-    $scroll.AutoScroll = $true
+    $activityHeader = [System.Windows.Forms.FlowLayoutPanel]::new()
+    $activityHeader.FlowDirection = [System.Windows.Forms.FlowDirection]::LeftToRight
+    $activityHeader.WrapContents = $false
+    $activityHeader.AutoSize = $true
+    $activityHeader.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $activityHeader.Width = $contentWidth
+    $activityHeader.Margin = [System.Windows.Forms.Padding]::new(0,0,0,10)
 
-    $y = 10
+    $activityLbl = [System.Windows.Forms.Label]::new()
+    $activityLbl.Text = 'Activity sort:'
+    $activityLbl.AutoSize = $true
+    $activityLbl.Margin = [System.Windows.Forms.Padding]::new(0,6,8,0)
+    [void]$activityHeader.Controls.Add($activityLbl)
+
+    $activitySort = [System.Windows.Forms.ComboBox]::new()
+    $activitySort.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    [void]$activitySort.Items.AddRange(@('Email Count','Total Size'))
+    $activitySort.SelectedIndex = 0
+    $activitySort.Width = 130
+    [void]$activityHeader.Controls.Add($activitySort)
+    [void]$root.Controls.Add($activityHeader)
+
+    $activityWrap = [System.Windows.Forms.TableLayoutPanel]::new()
+    $activityWrap.Width = $contentWidth
+    $activityWrap.AutoSize = $true
+    $activityWrap.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $activityWrap.ColumnCount = 2
+    $activityWrap.RowCount = 1
+    $activityWrap.Padding = [System.Windows.Forms.Padding]::new(0, 0, 0, 12)
+    $activityWrap.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new([System.Windows.Forms.SizeType]::Percent, 52))
+    $activityWrap.ColumnStyles.Add([System.Windows.Forms.ColumnStyle]::new([System.Windows.Forms.SizeType]::Percent, 48))
+
+    $sendCard = [System.Windows.Forms.GroupBox]::new()
+    $sendCard.Text = 'Top Sender Activity'
+    $sendCard.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $sendCard.MinimumSize = [System.Drawing.Size]::new(520, 390)
+    $sendCard.Padding = [System.Windows.Forms.Padding]::new(10, 18, 10, 10)
+    $sendGrid = [System.Windows.Forms.DataGridView]::new()
+    $sendGrid.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $sendGrid.ReadOnly = $true
+    $sendGrid.AllowUserToAddRows = $false
+    $sendGrid.AllowUserToDeleteRows = $false
+    $sendGrid.RowHeadersVisible = $false
+    $sendGrid.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::Fill
+    $sendGrid.SelectionMode = [System.Windows.Forms.DataGridViewSelectionMode]::FullRowSelect
+    $sendGrid.MultiSelect = $false
+    $sendGrid.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::AutoSize
+    Set-GridCols $sendGrid @('Sender','Email Count','Bytes','Avg Size') @(280,85,95,95)
+    [void]$sendCard.Controls.Add($sendGrid)
+
+    $rcptCard = [System.Windows.Forms.GroupBox]::new()
+    $rcptCard.Text = 'Top Recipient Activity'
+    $rcptCard.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $rcptCard.MinimumSize = [System.Drawing.Size]::new(520, 390)
+    $rcptCard.Padding = [System.Windows.Forms.Padding]::new(10, 18, 10, 10)
+    $rcptGrid = [System.Windows.Forms.DataGridView]::new()
+    $rcptGrid.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $rcptGrid.ReadOnly = $true
+    $rcptGrid.AllowUserToAddRows = $false
+    $rcptGrid.AllowUserToDeleteRows = $false
+    $rcptGrid.RowHeadersVisible = $false
+    $rcptGrid.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::Fill
+    $rcptGrid.SelectionMode = [System.Windows.Forms.DataGridViewSelectionMode]::FullRowSelect
+    $rcptGrid.MultiSelect = $false
+    $rcptGrid.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::AutoSize
+    Set-GridCols $rcptGrid @('Recipient','Email Count','Bytes','Avg Size') @(280,85,95,95)
+    [void]$rcptCard.Controls.Add($rcptGrid)
+
+    [void]$activityWrap.Controls.Add($sendCard, 0, 0)
+    [void]$activityWrap.Controls.Add($rcptCard, 1, 0)
+    [void]$root.Controls.Add($activityWrap)
+
+    $gallery = [System.Windows.Forms.FlowLayoutPanel]::new()
+    $gallery.FlowDirection = [System.Windows.Forms.FlowDirection]::TopDown
+    $gallery.WrapContents = $false
+    $gallery.AutoSize = $true
+    $gallery.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+    $gallery.Width = $contentWidth
+    $gallery.Margin = [System.Windows.Forms.Padding]::new(0,0,0,0)
+
+    $inputRows = if ($Stats.InputFilesBySize -and $Stats.InputFilesBySize.Count -gt 0) { $Stats.InputFilesBySize } else { @() }
+    $mailHourRows = if ($Stats.MailCountByHour) { $Stats.MailCountByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} } } else { @() }
+    $sizeHourRows = if ($Stats.SizeByHour) { $Stats.SizeByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} } } else { @() }
+    $sessionHourRows = if ($Stats.ByHour) { $Stats.ByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} } } else { @() }
     $chartDefs = @(
-        @{ T='Top Senders';      D=$Stats.TopSenders;   C=[System.Drawing.Color]::SteelBlue;     W=680; H=310 },
-        @{ T='Top Recipients';   D=$Stats.TopReceivers; C=[System.Drawing.Color]::SeaGreen;      W=680; H=310 },
-        @{ T='Top Errors';       D=$Stats.TopErrors;    C=[System.Drawing.Color]::Tomato;        W=680; H=310 },
-        @{ T='Sessions by Hour'; D=($Stats.ByHour | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} });
-                                                        C=[System.Drawing.Color]::DarkSlateBlue; W=800; H=310 }
+        @{ T='Input Files by Size'; D=$inputRows;              C=[System.Drawing.Color]::Chocolate;      W=760; H=310 },
+        @{ T='Top Senders by Size'; D=$Stats.TopSenders;       C=[System.Drawing.Color]::SteelBlue;      W=760; H=310 },
+        @{ T='Top Recipients by Size'; D=$Stats.TopReceivers;  C=[System.Drawing.Color]::SeaGreen;       W=760; H=310 },
+        @{ T='Top Errors';         D=$Stats.TopErrors;         C=[System.Drawing.Color]::Tomato;         W=760; H=310 },
+        @{ T='Mail Count by Hour';  D=$mailHourRows;            C=[System.Drawing.Color]::MediumSeaGreen; W=760; H=310 },
+        @{ T='Mail Size by Hour';   D=$sizeHourRows;            C=[System.Drawing.Color]::DarkGoldenrod;  W=760; H=310 },
+        @{ T='Sessions by Hour';    D=$sessionHourRows;         C=[System.Drawing.Color]::DarkSlateBlue;  W=760; H=310 },
+        @{ T='Top EHLO Hosts';      D=$Stats.TopEhloHosts;      C=[System.Drawing.Color]::CadetBlue;      W=760; H=310 },
+        @{ T='TLS Protocol Versions'; D=($Stats.TlsProtocols.GetEnumerator() | Sort-Object Value -Desc | ForEach-Object { [PSCustomObject]@{Key=$_.Key;Value=$_.Value} }); C=[System.Drawing.Color]::DarkCyan; W=760; H=310 },
+        @{ T='Top TLS Cipher Suites'; D=$Stats.TopTlsCiphers;   C=[System.Drawing.Color]::SlateBlue;      W=760; H=310 }
     )
     foreach ($cd in $chartDefs) {
         $bmp = New-BarChart $cd.T $cd.D -Width $cd.W -Height $cd.H -BarColor $cd.C
         $pb  = [System.Windows.Forms.PictureBox]::new()
-        $pb.Image = $bmp; $pb.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::AutoSize
-        $pb.Location = [System.Drawing.Point]::new(10, $y)
-        [void]$scroll.Controls.Add($pb); $y += $cd.H + 14
+        $pb.Image = $bmp
+        $pb.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::AutoSize
+        $pb.Margin = [System.Windows.Forms.Padding]::new(4, 4, 4, 16)
+        [void]$gallery.Controls.Add($pb)
     }
     $sd = @{}
     foreach ($kv in $Stats.StatusCounts.GetEnumerator()) { if ($kv.Value -gt 0) { $sd[$kv.Key] = $kv.Value } }
-    $pie = New-PieChart 'Session Status Distribution' $sd -Width 480 -Height 310
+    $pie = New-PieChart 'Session Status Distribution' $sd -Width 760 -Height 310
     $pp  = [System.Windows.Forms.PictureBox]::new()
-    $pp.Image = $pie; $pp.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::AutoSize
-    $pp.Location = [System.Drawing.Point]::new(10, $y)
-    [void]$scroll.Controls.Add($pp)
+    $pp.Image = $pie
+    $pp.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::AutoSize
+    $pp.Margin = [System.Windows.Forms.Padding]::new(4, 4, 4, 16)
+    [void]$gallery.Controls.Add($pp)
 
-    [void]$Panel.Controls.Add($scroll)
+    $updateActivityTables = {
+        param([string]$mode)
+        $sendGrid.Rows.Clear()
+        $rcptGrid.Rows.Clear()
+        $senderSet = if ($mode -eq 'Total Size') { $Stats.TopSenders } else { $Stats.TopSendersByCount }
+        $receiverSet = if ($mode -eq 'Total Size') { $Stats.TopReceivers } else { $Stats.TopReceiversByCount }
+        foreach ($kv in $senderSet) {
+            $avg = if ($kv.Count -gt 0) { [int64]([math]::Round(([double]$kv.Bytes / [double]$kv.Count), 0)) } else { [int64]0 }
+            [void]$sendGrid.Rows.Add($kv.Key, $kv.Count, (Format-ByteSize ([int64]$kv.Bytes)), (Format-ByteSize $avg))
+        }
+        foreach ($kv in $receiverSet) {
+            $avg = if ($kv.Count -gt 0) { [int64]([math]::Round(([double]$kv.Bytes / [double]$kv.Count), 0)) } else { [int64]0 }
+            [void]$rcptGrid.Rows.Add($kv.Key, $kv.Count, (Format-ByteSize ([int64]$kv.Bytes)), (Format-ByteSize $avg))
+        }
+        $sendCard.Text = if ($mode -eq 'Total Size') { 'Top Sender Activity by Size' } else { 'Top Sender Activity by Count' }
+        $rcptCard.Text = if ($mode -eq 'Total Size') { 'Top Recipient Activity by Size' } else { 'Top Recipient Activity by Count' }
+    }.GetNewClosure()
+
+    & $updateActivityTables $activitySort.SelectedItem.ToString()
+    $activitySort.Add_SelectedIndexChanged({
+        & $updateActivityTables $activitySort.SelectedItem.ToString()
+    }.GetNewClosure())
+
+    [void]$root.Controls.Add($gallery)
+    [void]$Panel.Controls.Add($root)
 }
 
 function Build-ErrorsTab {
@@ -1371,12 +1726,11 @@ function Build-ErrorsTab {
 # ================================================================
 function Build-MainForm {
     $form = [System.Windows.Forms.Form]::new()
-    $form.Text = "SMTP Protocol Log Parser v1.0 - Exchange Server"
+    $form.Text = "SMTP Protocol Log Parser v2.0 - Exchange Server"
     $form.Size = [System.Drawing.Size]::new(1300, 820)
     $form.MinimumSize = [System.Drawing.Size]::new(1000, 620)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
     $form.Font = [System.Drawing.Font]::new('Segoe UI', 9)
-
     # ---- MenuStrip ----
     $menu    = [System.Windows.Forms.MenuStrip]::new()
     $miFile  = [System.Windows.Forms.ToolStripMenuItem]::new('File')
@@ -1594,15 +1948,21 @@ function Build-MainForm {
 
     $Global:treeView.Add_AfterSelect({
         $node = $Global:UI_treeView.SelectedNode
-        if ($null -eq $node -or $null -eq $node.Tag) { return }
-        if ($null -ne $Global:UI_tabs -and $Global:UI_tabs.SelectedTab -ne $Global:UI_tabProto) { $Global:UI_tabs.SelectedTab = $Global:UI_tabProto }
-        $tag = $node.Tag
-        switch ($tag.Type) {
-            'Connector' { PopulateGridConnector $Global:UI_grid $Global:Sessions $tag.ConnectorId; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-            'Session'   { PopulateGridSession   $Global:UI_grid $tag.Session;                      if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-            'Mail'      { PopulateGridMail       $Global:UI_grid $tag.Session $tag.Mail;            if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-        }
+        Show-TreeNodeInProtocolGrid $Global:UI_treeView $node $Global:UI_grid $Global:Sessions $Global:UI_detailRtb
     })
+
+    $Global:treeView.Add_NodeMouseDoubleClick({
+        param($sender, $e)
+        $node = $e.Node
+        if ($null -eq $node) { return }
+        Show-TreeNodeInProtocolGrid $Global:UI_treeView $node $Global:UI_grid $Global:Sessions $Global:UI_detailRtb
+        if ($node.Tag -is [hashtable] -and $node.Tag.ContainsKey('Session')) {
+            $sn = Find-SessionTreeNode $Global:UI_treeView $node.Tag
+            if ($null -ne $sn) {
+                $sn.EnsureVisible()
+            }
+        }
+    }.GetNewClosure())
 
     # ---- EHLO tree ----
     $ehloSearch.Add_TextChanged({
@@ -1645,14 +2005,21 @@ function Build-MainForm {
 
     $ehloTree.Add_AfterSelect({
         $node = $Global:UI_ehloTree.SelectedNode
-        if ($null -eq $node -or $null -eq $node.Tag) { return }
-        if ($null -ne $Global:UI_tabs -and $Global:UI_tabs.SelectedTab -ne $Global:UI_tabProto) { $Global:UI_tabs.SelectedTab = $Global:UI_tabProto }
-        $tag = $node.Tag
-        switch ($tag.Type) {
-            'Session' { PopulateGridSession $Global:UI_grid $tag.Session; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-            'Mail'    { PopulateGridMail    $Global:UI_grid $tag.Session $tag.Mail; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-        }
+        Show-TreeNodeInProtocolGrid $Global:UI_ehloTree $node $Global:UI_grid $Global:Sessions $Global:UI_detailRtb
     })
+
+    $ehloTree.Add_NodeMouseDoubleClick({
+        param($sender, $e)
+        $node = $e.Node
+        if ($null -eq $node) { return }
+        Show-TreeNodeInProtocolGrid $Global:UI_ehloTree $node $Global:UI_grid $Global:Sessions $Global:UI_detailRtb
+        if ($node.Tag -is [hashtable] -and $node.Tag.ContainsKey('Session')) {
+            $sn = Find-SessionTreeNode $Global:UI_treeView $node.Tag
+            if ($null -ne $sn) {
+                $sn.EnsureVisible()
+            }
+        }
+    }.GetNewClosure())
 
     # ---- TLS tree ----
     $tlsSearch.Add_TextChanged({
@@ -1679,7 +2046,7 @@ function Build-MainForm {
         $tag = $node.Tag
         switch ($tag.Type) {
             'Session' { PopulateGridSession $Global:UI_grid $tag.Session; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
-            'Mail'    { PopulateGridMail    $Global:UI_grid $tag.Session $tag.Mail; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
+            'Mail'    { PopulateGridMail $Global:UI_grid $tag.Session $tag.Mail; if ($null -ne $Global:UI_detailRtb) { $Global:UI_detailRtb.Clear() } }
         }
     })
 
@@ -1697,6 +2064,23 @@ function Build-MainForm {
             }
             Update-DetailPanel $detailRtb $entry
         }
+    }.GetNewClosure())
+
+    # Double-click protocol grid -> navigate tree to the related session
+    $Global:grid.Add_CellDoubleClick({
+        $row = $null
+        if ($Global:grid.SelectedRows.Count -gt 0) {
+            $row = $Global:grid.SelectedRows[0]
+        } elseif ($null -ne $Global:grid.CurrentRow) {
+            $row = $Global:grid.CurrentRow
+        }
+        if ($null -eq $row) { return }
+        $node = Find-SessionTreeNode $Global:treeView $row.Tag
+        if ($null -eq $node) { return }
+        $leftTabs.SelectedTab = $tabSessions.Page
+        $Global:treeView.SelectedNode = $node
+        $node.EnsureVisible()
+        $tabs.SelectedTab = $tabProto
     }.GetNewClosure())
 
     # Tab switch -> lazy-load stats / errors
@@ -1753,6 +2137,20 @@ function Build-MainForm {
         }
 
         $files = $validFiles.ToArray()
+        $Global:LoadedFilesMeta = @()
+        $Global:LoadedInputBytes = [int64]0
+        foreach ($fp in $files) {
+            try {
+                $item = Get-Item -LiteralPath $fp -ErrorAction Stop
+                $Global:LoadedFilesMeta += [PSCustomObject]@{
+                    Key   = $item.Name
+                    Value = [int64]$item.Length
+                }
+                $Global:LoadedInputBytes += [int64]$item.Length
+            } catch {
+                WriteAppLog 'WARN' "Unable to read size for ${fp}: $_"
+            }
+        }
 
         $Global:Sessions = [System.Collections.Hashtable]::Synchronized(@{})
         $grid.Rows.Clear(); $grid.Columns.Clear(); $detailRtb.Clear()
@@ -1827,9 +2225,9 @@ function Build-MainForm {
                     $Global:UI_miOpen.Enabled   = $true; $Global:UI_tbOpen.Enabled   = $true
                     $Global:Sessions            = $Global:ActiveParseState.Sessions
                     $cnt = $Global:Sessions.Count
-                    PopulateTreeView  $Global:UI_treeView $Global:Sessions
-                    PopulateEhloTree  $Global:UI_ehloTree $Global:Sessions
-                    PopulateTlsTree   $Global:UI_tlsTree  $Global:Sessions
+                    PopulateTreeView $Global:UI_treeView $Global:Sessions
+                    PopulateEhloTree $Global:UI_ehloTree $Global:Sessions
+                    PopulateTlsTree $Global:UI_tlsTree $Global:Sessions
                     PopulateGridConnector $Global:UI_grid $Global:Sessions $null
                     $Global:UI_tbExport.Enabled = $true; $Global:UI_miExport.Enabled = $true
                     $elapsed = $Global:UI_sw.Elapsed.ToString('mm\:ss\.fff')
@@ -1917,7 +2315,7 @@ function Build-MainForm {
         $ab_pb.Location = [System.Drawing.Point]::new(20, 18)
 
         $ab_l1  = [System.Windows.Forms.Label]::new()
-        $ab_l1.Text     = 'SMTP Protocol Log Parser v1.0'
+        $ab_l1.Text     = 'SMTP Protocol Log Parser v2.0'
         $ab_l1.Font     = [System.Drawing.Font]::new('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
         $ab_l1.Location = [System.Drawing.Point]::new(20, 86)
         $ab_l1.AutoSize = $true
@@ -2001,21 +2399,19 @@ function Build-MainForm {
         if ($searchGrid.SelectedRows.Count -eq 0) { return }
         $target = $searchGrid.SelectedRows[0].Tag
         if ($null -eq $target) { return }
-        foreach ($cn in $Global:treeView.Nodes) {
-            foreach ($sn in $cn.Nodes) {
-                $t = $sn.Tag
-                if ($null -ne $t -and $t.Type -eq 'Session' -and $t.Session.SessionId -eq $target.SessionId) {
-                    $leftTabs.SelectedTab = $tabSessions.Page
-                    $Global:treeView.SelectedNode = $sn; $sn.EnsureVisible()
-                    $tabs.SelectedTab = $tabProto
-                    return
-                }
-            }
-        }
+        $sn = Find-SessionTreeNode $Global:treeView $target
+        if ($null -eq $sn) { return }
+        $leftTabs.SelectedTab = $tabSessions.Page
+        $Global:treeView.SelectedNode = $sn
+        $sn.EnsureVisible()
+        $tabs.SelectedTab = $tabProto
     }.GetNewClosure())
 
     return $form
 }
+
+# Export script-defined functions into global scope so WinForms event handlers can resolve them.
+Export-ScriptFunctionsToGlobal
 
 # ================================================================
 #  ENTRY POINT
