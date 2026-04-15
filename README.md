@@ -1,11 +1,15 @@
-# <p style="text-align:center;">SMTP Protocol Log Parser v2.2</p> 
+# <p style="text-align:center;">SMTP Protocol Log Parser v2.3</p> 
 
 <p style="text-align: center"><img src="https://www.cloudvision.com.tr/images/Logo/CV.png"></p>
 
 [Cloud Vision](www.cloudvision.com.tr)
 
-
 A Windows GUI tool for reading and analyzing Exchange Server SMTP Receive protocol logs. Built entirely in PowerShell 5.1 with no external dependencies - just run the script.
+
+## Updated to v2.3 15.04.2026
+- Changed inline quick search in treeview to search via button for keeping ui not freezing.
+- Added cell selection for easy copy/paste operations.
+- Fixed TreeView selection issue which changes was not reflect protocol view grid
 
 ## Updated to v2.2 15.04.2026
 - added multiple file group opening feature to combine multiple server/folder of logs if required
