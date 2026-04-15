@@ -7,13 +7,17 @@
 
 A Windows GUI tool for reading and analyzing Exchange Server SMTP Receive protocol logs. Built entirely in PowerShell 5.1 with no external dependencies - just run the script.
 
-## Updated to v2.1 15.04.2026
+## Updated to v2.2 15.04.2026
+- added multiple file group opening feature to combine multiple server/folder of logs if required
+- export tree view feature to export current session,ehlo or tls view to HTML
+- all session details export seperated from html to csv file
+- fixed INT limit while exporting high number of sessions.
 
-Fixed file read issue while trying to open current active connector log file.
+## Updated to v2.1 15.04.2026
+- Fixed file read issue while trying to open current active connector log file.
 
 ## Updated to v2 04.04.2026
-
-Added SMTP Size sections and fixed Powershell direct calling. Also statistics are updated with more details .
+- Added SMTP Size sections and fixed Powershell direct calling. Also statistics are updated with more details .
 
 ## What it does
 
