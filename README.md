@@ -1,4 +1,4 @@
-# <p style="text-align:center;">SMTP Protocol Log Parser v2.1</p> 
+# <p style="text-align:center;">SMTP Protocol Log Parser v2.2</p> 
 
 <p style="text-align: center"><img src="https://www.cloudvision.com.tr/images/Logo/CV.png"></p>
 
