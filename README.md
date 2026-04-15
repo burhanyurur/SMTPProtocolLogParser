@@ -1,4 +1,4 @@
-# <p style="text-align:center;">SMTP Protocol Log Parser v2</p> 
+# <p style="text-align:center;">SMTP Protocol Log Parser v2.1</p> 
 
 <p style="text-align: center"><img src="https://www.cloudvision.com.tr/images/Logo/CV.png"></p>
 
@@ -7,6 +7,9 @@
 
 A Windows GUI tool for reading and analyzing Exchange Server SMTP Receive protocol logs. Built entirely in PowerShell 5.1 with no external dependencies - just run the script.
 
+## Updated to v2.1 15.04.2026
+
+Fixed file read issue while trying to open current active connector log file.
 
 ## Updated to v2 04.04.2026
 
