@@ -9,7 +9,7 @@ SOFTWARE.
 #>
 
 <#
-SMTP Protocol Log Parser v2.0
+SMTP Protocol Log Parser v2.2
 - Parses SMTP protocol logs from Microsoft Exchange Server and generates an HTML report with detailed analysis and statistics
 - Provides a GUI for selecting log files, viewing parsed data, and exporting reports
 - Developed by CloudVision (https://www.cloudvision.com.tr)
@@ -133,7 +133,7 @@ function New-Session {
         ErrorCode      = ''
         ErrorMessage   = ''
         HasMail        = $false
-        TotalSizeBytes = 0
+        TotalSizeBytes = [int64]0
         Mails          = [System.Collections.Generic.List[hashtable]]::new()
         Entries        = [System.Collections.Generic.List[hashtable]]::new()
         EhloHost       = ''
@@ -147,7 +147,7 @@ function New-MailObject {
         SenderAddress = ''
         Recipients    = [System.Collections.Generic.List[string]]::new()
         MessageId     = ''
-        SizeBytes     = 0
+        SizeBytes     = [int64]0
         StartTime     = ''
         StartSeq      = $StartSeq
         EndSeq        = -1
@@ -340,7 +340,7 @@ function FinalizeParsedSessions {
     param([hashtable]$Sessions)
 
     foreach ($s in $Sessions.Values) {
-        $s.TotalSizeBytes = 0
+        $s.TotalSizeBytes = [int64]0
         # Set EndSeq and status for each mail object
         for ($i = 0; $i -lt $s.Mails.Count; $i++) {
             $m = $s.Mails[$i]
@@ -796,8 +796,8 @@ function New-BarChart {
         $g.Dispose(); $tfont.Dispose(); return $bmp
     }
 
-    $maxVal = ($Data | ForEach-Object { [int]$_.$ValProp } | Measure-Object -Maximum).Maximum
-    if ($maxVal -lt 1) { $maxVal = 1 }
+    $maxVal = ($Data | ForEach-Object { [int64]$_.$ValProp } | Measure-Object -Maximum).Maximum
+    if ($maxVal -lt 1) { $maxVal = [int64]1 }
 
     $cnt   = $Data.Count
     $slotW = $cW / $cnt
@@ -815,7 +815,7 @@ function New-BarChart {
     # y-axis tick labels
     $axisValFont = [System.Drawing.Font]::new('Segoe UI', 7)
     for ($tick = 0; $tick -le 4; $tick++) {
-        $tv  = [int]($maxVal * $tick / 4)
+        $tv  = [int64]($maxVal * $tick / 4)
         $ty  = [float]($padT + $cH - ($cH * $tick / 4))
         $g.DrawString($tv.ToString(), $axisValFont, [System.Drawing.Brushes]::Gray, [float]2, $ty - 7)
         $g.DrawLine([System.Drawing.Pens]::LightGray, [float]$padL, $ty, [float]($padL + $cW), $ty)
@@ -823,7 +823,7 @@ function New-BarChart {
 
     for ($i = 0; $i -lt $cnt; $i++) {
         $item  = $Data[$i]
-        $val   = [int]$item.$ValProp
+        $val   = [int64]$item.$ValProp
         $bh    = [int](([double]$val / $maxVal) * $cH)
         $bx    = [int]($padL + $i * $slotW + ($slotW - $barW) / 2)
         $by    = [int]($padT + $cH - $bh)
@@ -927,8 +927,26 @@ function Format-ByteSize {
     return ('{0:N1} TB' -f ($Bytes / 1000000000000.0))
 }
 
+function Export-SessionsCsv {
+    param([string]$OutputPath, $Sessions)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('SessionId,Connector,RemoteIP,Start,EhloHost,TLS,TLSProtocol,Sender,Recipients,MailSize,Status,Error')
+    foreach ($s in ($Sessions.Values | Sort-Object { $_.StartTime })) {
+        $ip       = if ($s.RemoteEndpoint -match '^(.+):\d+$') { $Matches[1] } else { $s.RemoteEndpoint }
+        $tls      = if ($s.TlsInfo.Used) { 'Yes' } else { 'No' }
+        $tlsProto = $s.TlsInfo.Protocol
+        $recips   = ($s.Recipients -join '; ') -replace '"','""'
+        $sender   = $s.SenderAddress -replace '"','""'
+        $ehlo     = $s.EhloHost -replace '"','""'
+        $conn     = $s.ConnectorId -replace '"','""'
+        $err      = $s.ErrorCode -replace '"','""'
+        $lines.Add("$($s.SessionId),`"$conn`",$ip,$($s.StartTime),`"$ehlo`",$tls,$tlsProto,`"$sender`",`"$recips`",$($s.TotalSizeBytes),$($s.Status),`"$err`"")
+    }
+    [System.IO.File]::WriteAllLines($OutputPath, $lines, [System.Text.Encoding]::UTF8)
+}
+
 function Export-HtmlReport {
-    param([string]$OutputPath, $Sessions, $Stats)
+    param([string]$OutputPath, [string]$CsvPath, $Sessions, $Stats)
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.Append(@'
@@ -936,7 +954,7 @@ function Export-HtmlReport {
 <html>
 <head>
 <meta charset="UTF-8">
-<title>SMTP Protocol Log Parser v2.0 Report</title>
+<title>SMTP Protocol Log Parser v2.1 Report</title>
 <style>
 :root{
     --bg:#eef2f7;
@@ -1098,21 +1116,112 @@ tbody tr:hover td{background:#eaf2fb}
     }
     [void]$sb.Append("</div></section>")
 
-    # sessions table
-    [void]$sb.Append("<section class='section'><h2>All Sessions</h2><div class='table-wrap'><table><thead><tr><th>Session ID</th><th>Connector</th><th>Remote IP</th><th>Start</th><th>EHLO Host</th><th>TLS</th><th>Sender</th><th>Recipients</th><th>Mail Size</th><th>Status</th><th>Error</th></tr></thead><tbody>")
-    foreach ($s in ($Sessions.Values | Sort-Object { $_.StartTime })) {
-        $cls     = switch ($s.Status) { 'OK' {'ok'} 'Error' {'er'} default {'ic'} }
-        $ip      = if ($s.RemoteEndpoint -match '^(.+):\d+$') { $Matches[1] } else { $s.RemoteEndpoint }
-        $tlsCell = if ($s.TlsInfo.Used) {
-            $proto = if ($s.TlsInfo.Protocol -ne '') { $s.TlsInfo.Protocol } else { 'Yes' }
-            "<span style='color:#2a7a2a;font-weight:600'>$proto</span>"
-        } else { "<span style='color:#888'>No</span>" }
-        $ehloCell = HtmlEncode ($(if ($s.EhloHost -ne '') { $s.EhloHost } else { '' }))
-        [void]$sb.Append("<tr><td>$($s.SessionId)</td><td>$(HtmlEncode $s.ConnectorId)</td><td>$ip</td><td>$($s.StartTime)</td><td>$ehloCell</td><td>$tlsCell</td><td>$(HtmlEncode $s.SenderAddress)</td><td>$(HtmlEncode ($s.Recipients -join '; '))</td><td>$(Format-ByteSize ([int64]$s.TotalSizeBytes))</td><td class='$cls'>$($s.Status)</td><td class='er'>$(HtmlEncode $s.ErrorCode)</td></tr>")
-    }
-    [void]$sb.Append("</tbody></table></div></section>")
-    [void]$sb.Append("<div class='footer'>Generated by SMTP Protocol Log Parser v2.0 - <a href='https://www.cloudvision.com.tr'>cloudvision.com.tr</a></div></div></body></html>")
+    # sessions CSV reference
+    $csvFileName = [System.IO.Path]::GetFileName($CsvPath)
+    [void]$sb.Append("<section class='section'><h2>All Sessions</h2><p style='margin:0;font-size:13px'>Session data has been exported to a separate CSV file to keep this report compact.<br>File: <a href='$csvFileName' style='color:#1b6d9b'>$csvFileName</a></p></section>")
+    [void]$sb.Append("<div class='footer'>Generated by SMTP Protocol Log Parser v2.1 - <a href='https://www.cloudvision.com.tr'>cloudvision.com.tr</a></div></div></body></html>")
 
+    [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), [System.Text.Encoding]::UTF8)
+}
+
+function Export-TreeHtml {
+    param([string]$OutputPath, [int]$TabIndex, $Sessions)
+
+    $cssHeader = @'
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SMTP Tree Export</title>
+<style>
+:root{--brand:#163a5f;--line:#d7dee8;--shadow:0 10px 30px rgba(16,24,40,.08)}
+*{box-sizing:border-box}
+body{font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;background:#eef2f7;color:#1f2937}
+.hero{background:linear-gradient(135deg,#163a5f 0%,#11314f 45%,#0f4c5c 100%);color:#fff;padding:18px 28px}
+.hero h1{margin:0;font-size:22px}.hero p{margin:4px 0 0;color:rgba(255,255,255,.8);font-size:12px}
+.container{max-width:1480px;margin:0 auto;padding:16px}
+.section{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px;margin-bottom:14px}
+.section h2{margin:0 0 10px;color:var(--brand);font-size:16px}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th{background:#173b5c;color:#fff;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap}
+td{padding:6px 10px;border-bottom:1px solid #edf2f7;font-size:12px;vertical-align:top}
+tbody tr:nth-child(even) td{background:#f8fbfe}
+tbody tr:hover td{background:#eaf2fb}
+.ok{color:#2a7a2a;font-weight:600}.er{color:#c0392b;font-weight:600}.ic{color:#d35400;font-weight:600}
+.footer{padding:12px 0 6px;color:#6b7280;font-size:11px;text-align:center}
+.footer a{color:#1b6d9b;text-decoration:none}
+</style>
+</head>
+<body>
+'@
+
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.Append($cssHeader)
+
+    $genTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+    if ($TabIndex -eq 0) {
+        # Sessions tab: aggregate by Connector + Remote IP
+        [void]$sb.Append("<div class='hero'><h1>Sessions Tree Export</h1><p>Generated: $genTime</p></div><div class='container'><div class='section'><h2>Sessions by Connector</h2><div class='table-wrap'>")
+        [void]$sb.Append("<table><thead><tr><th>Connector</th><th>Remote IP</th><th>Email Count</th><th>Total Size</th></tr></thead><tbody>")
+        $agg = @{}
+        foreach ($s in $Sessions.Values) {
+            $conn = if ($s.ConnectorId -ne '') { $s.ConnectorId } else { '(No Connector)' }
+            $ip   = Get-RemoteIP $s.RemoteEndpoint
+            $k    = "$conn`t$ip"
+            if (-not $agg.ContainsKey($k)) { $agg[$k] = @{ Connector=$conn; IP=$ip; Mails=0; Bytes=[int64]0 } }
+            $agg[$k].Mails += $s.Mails.Count
+            $agg[$k].Bytes += [int64]$s.TotalSizeBytes
+        }
+        foreach ($r in ($agg.Values | Sort-Object { $_.Connector }, { $_.IP })) {
+            $size = if ($r.Bytes -gt 0) { Format-ByteSize $r.Bytes } else { '-' }
+            [void]$sb.Append("<tr><td>$(HtmlEncode $r.Connector)</td><td>$(HtmlEncode $r.IP)</td><td>$($r.Mails)</td><td>$size</td></tr>")
+        }
+        [void]$sb.Append("</tbody></table></div></div>")
+
+    } elseif ($TabIndex -eq 1) {
+        # EHLO tab: aggregate by EHLO Host + Remote IP
+        [void]$sb.Append("<div class='hero'><h1>EHLO Tree Export</h1><p>Generated: $genTime</p></div><div class='container'><div class='section'><h2>Sessions by EHLO Host</h2><div class='table-wrap'>")
+        [void]$sb.Append("<table><thead><tr><th>EHLO Host</th><th>Remote IP</th><th>Email Count</th><th>Total Size</th></tr></thead><tbody>")
+        $agg = @{}
+        foreach ($s in $Sessions.Values) {
+            $ehlo = if ($s.EhloHost -ne '') { $s.EhloHost } else { '(no EHLO)' }
+            $ip   = Get-RemoteIP $s.RemoteEndpoint
+            $k    = "$ehlo`t$ip"
+            if (-not $agg.ContainsKey($k)) { $agg[$k] = @{ Ehlo=$ehlo; IP=$ip; Mails=0; Bytes=[int64]0 } }
+            $agg[$k].Mails += $s.Mails.Count
+            $agg[$k].Bytes += [int64]$s.TotalSizeBytes
+        }
+        foreach ($r in ($agg.Values | Sort-Object { $_.Ehlo }, { $_.IP })) {
+            $size = if ($r.Bytes -gt 0) { Format-ByteSize $r.Bytes } else { '-' }
+            [void]$sb.Append("<tr><td>$(HtmlEncode $r.Ehlo)</td><td>$(HtmlEncode $r.IP)</td><td>$($r.Mails)</td><td>$size</td></tr>")
+        }
+        [void]$sb.Append("</tbody></table></div></div>")
+
+    } else {
+        # TLS tab: aggregate by EHLO Host + Remote IP + TLS Version
+        [void]$sb.Append("<div class='hero'><h1>TLS Tree Export</h1><p>Generated: $genTime</p></div><div class='container'><div class='section'><h2>Sessions with TLS Information</h2><div class='table-wrap'>")
+        [void]$sb.Append("<table><thead><tr><th>EHLO Host</th><th>Remote IP</th><th>TLS Version</th><th>Email Count</th><th>Total Size</th></tr></thead><tbody>")
+        $agg = @{}
+        foreach ($s in $Sessions.Values) {
+            $ehlo   = if ($s.EhloHost -ne '') { $s.EhloHost } else { '(no EHLO)' }
+            $ip     = Get-RemoteIP $s.RemoteEndpoint
+            $tlsRaw = if ($s.TlsInfo.Used) { if ($s.TlsInfo.Protocol -ne '') { $s.TlsInfo.Protocol } else { 'negotiated' } } else { 'No TLS' }
+            $k      = "$ehlo`t$ip`t$tlsRaw"
+            if (-not $agg.ContainsKey($k)) { $agg[$k] = @{ Ehlo=$ehlo; IP=$ip; TlsVer=$tlsRaw; Mails=0; Bytes=[int64]0 } }
+            $agg[$k].Mails += $s.Mails.Count
+            $agg[$k].Bytes += [int64]$s.TotalSizeBytes
+        }
+        foreach ($r in ($agg.Values | Sort-Object { $_.Ehlo }, { $_.IP })) {
+            $tlsCell = if ($r.TlsVer -eq 'No TLS') { '<span style="color:#888">No TLS</span>' } else { HtmlEncode $r.TlsVer }
+            $size    = if ($r.Bytes -gt 0) { Format-ByteSize $r.Bytes } else { '-' }
+            [void]$sb.Append("<tr><td>$(HtmlEncode $r.Ehlo)</td><td>$(HtmlEncode $r.IP)</td><td>$tlsCell</td><td>$($r.Mails)</td><td>$size</td></tr>")
+        }
+        [void]$sb.Append("</tbody></table></div></div>")
+    }
+
+    [void]$sb.Append("<div class='container'><div class='footer'>Generated by SMTP Protocol Log Parser v2.1 - <a href='https://www.cloudvision.com.tr'>cloudvision.com.tr</a></div></div></body></html>")
     [System.IO.File]::WriteAllText($OutputPath, $sb.ToString(), [System.Text.Encoding]::UTF8)
 }
 
@@ -1730,11 +1839,192 @@ function Build-ErrorsTab {
 }
 
 # ================================================================
+#  LOG SOURCES DIALOG
+# ================================================================
+function Show-LogSourcesDialog {
+    # Returns string[] of resolved+validated file paths, or $null if cancelled.
+
+    $dlg = [System.Windows.Forms.Form]::new()
+    $dlg.Text = 'Select Log Sources'
+    $dlg.Size = [System.Drawing.Size]::new(600, 420)
+    $dlg.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
+    $dlg.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+
+    $lbl = [System.Windows.Forms.Label]::new()
+    $lbl.Text = 'Log file paths or patterns (e.g. C:\Logs\*.log):'
+    $lbl.Location = [System.Drawing.Point]::new(10, 10)
+    $lbl.Size = [System.Drawing.Size]::new(570, 18)
+
+    $listBox = [System.Windows.Forms.ListBox]::new()
+    $listBox.Location = [System.Drawing.Point]::new(10, 32)
+    $listBox.Size = [System.Drawing.Size]::new(565, 248)
+    $listBox.SelectionMode = [System.Windows.Forms.SelectionMode]::One
+    $listBox.HorizontalScrollbar = $true
+    $listBox.Font = [System.Drawing.Font]::new('Consolas', 9)
+
+    $txtEntry = [System.Windows.Forms.TextBox]::new()
+    $txtEntry.Location = [System.Drawing.Point]::new(10, 290)
+    $txtEntry.Size = [System.Drawing.Size]::new(320, 23)
+
+    $btnAdd = [System.Windows.Forms.Button]::new()
+    $btnAdd.Text = 'Add'
+    $btnAdd.Location = [System.Drawing.Point]::new(335, 289)
+    $btnAdd.Size = [System.Drawing.Size]::new(60, 25)
+
+    $btnBrowse = [System.Windows.Forms.Button]::new()
+    $btnBrowse.Text = 'Browse...'
+    $btnBrowse.Location = [System.Drawing.Point]::new(400, 289)
+    $btnBrowse.Size = [System.Drawing.Size]::new(80, 25)
+
+    $btnRemove = [System.Windows.Forms.Button]::new()
+    $btnRemove.Text = 'Remove'
+    $btnRemove.Location = [System.Drawing.Point]::new(485, 289)
+    $btnRemove.Size = [System.Drawing.Size]::new(80, 25)
+
+    $btnOK = [System.Windows.Forms.Button]::new()
+    $btnOK.Text = 'OK'
+    $btnOK.Location = [System.Drawing.Point]::new(400, 330)
+    $btnOK.Size = [System.Drawing.Size]::new(80, 28)
+
+    $btnCancel = [System.Windows.Forms.Button]::new()
+    $btnCancel.Text = 'Cancel'
+    $btnCancel.Location = [System.Drawing.Point]::new(485, 330)
+    $btnCancel.Size = [System.Drawing.Size]::new(80, 28)
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+
+    $dlg.Controls.AddRange(@($lbl, $listBox, $txtEntry, $btnAdd, $btnBrowse, $btnRemove, $btnOK, $btnCancel))
+    $dlg.CancelButton = $btnCancel
+    $dlg.AcceptButton = $btnAdd   # Enter in textbox triggers Add
+
+    $btnAdd.Add_Click({
+        $entry = $txtEntry.Text.Trim()
+        if ($entry -ne '' -and $listBox.Items.IndexOf($entry) -lt 0) {
+            [void]$listBox.Items.Add($entry)
+            $txtEntry.Clear()
+            $txtEntry.Focus()
+        }
+    })
+
+    $btnBrowse.Add_Click({
+        $ofd = [System.Windows.Forms.OpenFileDialog]::new()
+        $ofd.Title = 'Select Log File(s)'
+        $ofd.Filter = 'Log Files (*.log;*.csv)|*.log;*.csv|All Files (*.*)|*.*'
+        $ofd.Multiselect = $true
+        if ($ofd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            foreach ($f in $ofd.FileNames) {
+                if ($listBox.Items.IndexOf($f) -lt 0) {
+                    [void]$listBox.Items.Add($f)
+                }
+            }
+        }
+    })
+
+    $btnRemove.Add_Click({
+        if ($listBox.SelectedIndex -ge 0) {
+            $listBox.Items.RemoveAt($listBox.SelectedIndex)
+        }
+    })
+
+    $btnOK.Add_Click({
+        if ($listBox.Items.Count -eq 0) {
+            [void][System.Windows.Forms.MessageBox]::Show(
+                'Add at least one log file or pattern.',
+                'No Sources',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information)
+            return
+        }
+        $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dlg.Close()
+    })
+
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+
+    # Expand wildcard patterns to actual file paths
+    $resolved       = [System.Collections.Generic.List[string]]::new()
+    $noMatchReasons = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($entry in $listBox.Items) {
+        if ($entry -match '[*?]') {
+            $dir    = Split-Path -Parent $entry
+            $filter = Split-Path -Leaf  $entry
+            if ([string]::IsNullOrEmpty($dir) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
+                $noMatchReasons.Add("Directory not found: $dir")
+                continue
+            }
+            $matched = @(Get-ChildItem -Path $dir -Filter $filter -File -ErrorAction SilentlyContinue)
+            if ($matched.Count -eq 0) {
+                $noMatchReasons.Add("No files matched: $entry")
+                continue
+            }
+            foreach ($m in $matched) {
+                if ($resolved.IndexOf($m.FullName) -lt 0) { $resolved.Add($m.FullName) }
+            }
+        } else {
+            if ($resolved.IndexOf($entry) -lt 0) { $resolved.Add($entry) }
+        }
+    }
+
+    if ($noMatchReasons.Count -gt 0) {
+        $msg = "The following entries matched no files:`n`n" + ($noMatchReasons -join "`n")
+        if ($resolved.Count -gt 0) {
+            $msg += "`n`nIgnore and continue with $($resolved.Count) resolved file(s)?"
+            $ans = [System.Windows.Forms.MessageBox]::Show($msg, 'Pattern Warning', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return $null }
+        } else {
+            [void][System.Windows.Forms.MessageBox]::Show($msg, 'No Files Found', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            return $null
+        }
+    }
+
+    if ($resolved.Count -eq 0) { return $null }
+
+    # Validate each resolved file
+    $validFiles = [System.Collections.Generic.List[string]]::new()
+    $badReasons = [System.Collections.Generic.List[string]]::new()
+    $warnMsgs   = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($f in $resolved) {
+        $check = Test-LogFile $f
+        if (-not $check.OK) {
+            $badReasons.Add($check.Reason)
+            WriteAppLog 'WARN' "Skipping file: $($check.Reason)"
+        } else {
+            $validFiles.Add($f)
+            if ($check.Warning -ne '') {
+                $warnMsgs.Add($check.Warning)
+                WriteAppLog 'WARN' $check.Warning
+            }
+        }
+    }
+
+    if ($badReasons.Count -gt 0) {
+        $msg = "The following file(s) cannot be loaded:`n`n" + ($badReasons -join "`n")
+        if ($validFiles.Count -gt 0) {
+            $msg += "`n`nIgnore and continue with the remaining $($validFiles.Count) valid file(s)?"
+            $ans = [System.Windows.Forms.MessageBox]::Show($msg, 'File Validation', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            if ($ans -ne [System.Windows.Forms.DialogResult]::Yes) { return $null }
+        } else {
+            [void][System.Windows.Forms.MessageBox]::Show($msg, 'File Validation', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            return $null
+        }
+    }
+
+    if ($warnMsgs.Count -gt 0) {
+        $msg = "Note:`n`n" + ($warnMsgs -join "`n") + "`n`nThe file(s) will still be loaded."
+        [void][System.Windows.Forms.MessageBox]::Show($msg, 'File Warning', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+
+    return $validFiles.ToArray()
+}
+
+# ================================================================
 #  MAIN FORM
 # ================================================================
 function Build-MainForm {
     $form = [System.Windows.Forms.Form]::new()
-    $form.Text = "SMTP Protocol Log Parser v2.0 - Exchange Server"
+    $form.Text = "SMTP Protocol Log Parser v2.2 - CloudVision (www.cloudvision.com.tr)"
     $form.Size = [System.Drawing.Size]::new(1300, 820)
     $form.MinimumSize = [System.Drawing.Size]::new(1000, 620)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -1761,8 +2051,9 @@ function Build-MainForm {
     # ---- ToolStrip ----
     $toolbar  = [System.Windows.Forms.ToolStrip]::new()
     $tbOpen   = [System.Windows.Forms.ToolStripButton]::new('Open Files')
-    $tbExport = [System.Windows.Forms.ToolStripButton]::new('Export HTML'); $tbExport.Enabled = $false
-    $tbLog    = [System.Windows.Forms.ToolStripButton]::new('View Log')
+    $tbExport     = [System.Windows.Forms.ToolStripButton]::new('Export HTML'); $tbExport.Enabled = $false
+    $tbExportTree = [System.Windows.Forms.ToolStripButton]::new('Export Tree'); $tbExportTree.Enabled = $false
+    $tbLog        = [System.Windows.Forms.ToolStripButton]::new('View Log')
     $tbProg   = [System.Windows.Forms.ToolStripProgressBar]::new(); $tbProg.Width=0
     $tbLabel  = [System.Windows.Forms.ToolStripLabel]::new('Ready')
     $logoBmp  = Get-LogoBitmap
@@ -1775,7 +2066,7 @@ function Build-MainForm {
     $tbLogo.ImageScaling = [System.Windows.Forms.ToolStripItemImageScaling]::None
     $tbLogo.Alignment    = [System.Windows.Forms.ToolStripItemAlignment]::Right
     $tbLogo.Padding      = [System.Windows.Forms.Padding]::new(6, 0, 6, 0)
-    [void]$toolbar.Items.AddRange(@($tbOpen,$tbExport,
+    [void]$toolbar.Items.AddRange(@($tbOpen,$tbExport,$tbExportTree,
         [System.Windows.Forms.ToolStripSeparator]::new(),$tbLog,
         [System.Windows.Forms.ToolStripSeparator]::new(),$tbProg,$tbLabel,$tbLogo))
 
@@ -2105,46 +2396,8 @@ function Build-MainForm {
 
     # ---- Open Files ----
     $doOpen = {
-        $ofd = [System.Windows.Forms.OpenFileDialog]::new()
-        $ofd.Title = 'Select Exchange SMTP Log File(s)'
-        $ofd.Filter = 'Log Files (*.log;*.csv)|*.log;*.csv|All Files (*.*)|*.*'
-        $ofd.Multiselect = $true
-        if ($ofd.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
-        $files = $ofd.FileNames
-        if ($files.Count -eq 0) { return }
-
-        # Validate each selected file before touching any UI state
-        $validFiles  = [System.Collections.Generic.List[string]]::new()
-        $badReasons  = [System.Collections.Generic.List[string]]::new()
-        $warnMsgs    = [System.Collections.Generic.List[string]]::new()
-        foreach ($f in $files) {
-            $result = Test-LogFile $f
-            if (-not $result.OK) {
-                $badReasons.Add($result.Reason)
-                WriteAppLog 'WARN' "Skipping file: $($result.Reason)"
-            } else {
-                $validFiles.Add($f)
-                if ($result.Warning -ne '') {
-                    $warnMsgs.Add($result.Warning)
-                    WriteAppLog 'WARN' $result.Warning
-                }
-            }
-        }
-
-        if ($badReasons.Count -gt 0) {
-            $msg = "The following file(s) cannot be loaded and will be skipped:`n`n" + ($badReasons -join "`n")
-            if ($validFiles.Count -gt 0) { $msg += "`n`nContinue with the remaining $($validFiles.Count) valid file(s)?" }
-            $buttons = if ($validFiles.Count -gt 0) { [System.Windows.Forms.MessageBoxButtons]::YesNo } else { [System.Windows.Forms.MessageBoxButtons]::OK }
-            $answer  = [System.Windows.Forms.MessageBox]::Show($msg, 'File Validation', $buttons, [System.Windows.Forms.MessageBoxIcon]::Warning)
-            if ($validFiles.Count -eq 0 -or $answer -eq [System.Windows.Forms.DialogResult]::No) { return }
-        }
-
-        if ($warnMsgs.Count -gt 0) {
-            $msg = "Note:`n`n" + ($warnMsgs -join "`n") + "`n`nThe file(s) will still be loaded."
-            [void][System.Windows.Forms.MessageBox]::Show($msg, 'File Warning', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        }
-
-        $files = $validFiles.ToArray()
+        $files = Show-LogSourcesDialog
+        if ($null -eq $files -or $files.Count -eq 0) { return }
         $Global:LoadedFilesMeta = @()
         $Global:LoadedInputBytes = [int64]0
         foreach ($fp in $files) {
@@ -2165,7 +2418,7 @@ function Build-MainForm {
         $statsPanel.Controls.Clear(); $errorsPanel.Controls.Clear()
         $searchGrid.Rows.Clear(); $searchGrid.Columns.Clear()
         $Global:treeView.Nodes.Clear(); $ehloTree.Nodes.Clear(); $tlsTree.Nodes.Clear()
-        $tbExport.Enabled = $false; $miExport.Enabled = $false
+        $tbExport.Enabled = $false; $tbExportTree.Enabled = $false; $miExport.Enabled = $false
         $tbProg.Style   = [System.Windows.Forms.ProgressBarStyle]::Blocks
         $tbProg.Minimum = 0; $tbProg.Maximum = 100; $tbProg.Value = 0
         $tbProg.Width = 200
@@ -2196,12 +2449,14 @@ function Build-MainForm {
         $Global:UI_tlsTree    = $tlsTree
         $Global:UI_grid       = $Global:grid
         $Global:UI_detailRtb  = $detailRtb
+        $Global:UI_leftTabs   = $leftTabs
         $Global:UI_tabs       = $tabs
         $Global:UI_tabProto   = $tabProto
         $Global:UI_miOpen     = $miOpen
         $Global:UI_tbOpen     = $tbOpen
-        $Global:UI_tbExport   = $tbExport
-        $Global:UI_miExport   = $miExport
+        $Global:UI_tbExport     = $tbExport
+        $Global:UI_tbExportTree = $tbExportTree
+        $Global:UI_miExport     = $miExport
         $Global:UI_files      = $files
         $Global:UI_sw         = $sw
 
@@ -2237,7 +2492,7 @@ function Build-MainForm {
                     PopulateEhloTree $Global:UI_ehloTree $Global:Sessions
                     PopulateTlsTree $Global:UI_tlsTree $Global:Sessions
                     PopulateGridConnector $Global:UI_grid $Global:Sessions $null
-                    $Global:UI_tbExport.Enabled = $true; $Global:UI_miExport.Enabled = $true
+                    $Global:UI_tbExport.Enabled = $true; $Global:UI_tbExportTree.Enabled = $true; $Global:UI_miExport.Enabled = $true
                     $elapsed = $Global:UI_sw.Elapsed.ToString('mm\:ss\.fff')
                     $Global:UI_tbLabel.Text    = "Done. $cnt sessions."
                     $Global:UI_sbMsg.Text      = "Parsed $($Global:UI_files.Count) file(s) - $cnt sessions loaded"
@@ -2278,11 +2533,14 @@ function Build-MainForm {
         $form.Cursor  = [System.Windows.Forms.Cursors]::WaitCursor
         $tbLabel.Text = 'Exporting...'
         try {
-            $stats = Get-Statistics $Global:Sessions
-            Export-HtmlReport -OutputPath $sfd.FileName -Sessions $Global:Sessions -Stats $stats
+            $stats   = Get-Statistics $Global:Sessions
+            $csvPath = [System.IO.Path]::ChangeExtension($sfd.FileName, $null).TrimEnd('.') + '_Sessions.csv'
+            Export-SessionsCsv -OutputPath $csvPath -Sessions $Global:Sessions
+            Export-HtmlReport -OutputPath $sfd.FileName -CsvPath $csvPath -Sessions $Global:Sessions -Stats $stats
             $tbLabel.Text = 'Export complete.'
             WriteAppLog 'INFO' "HTML exported: $($sfd.FileName)"
-            [void][System.Windows.Forms.MessageBox]::Show("Report saved:`n$($sfd.FileName)", 'Export Complete',
+            WriteAppLog 'INFO' "Sessions CSV exported: $csvPath"
+            [void][System.Windows.Forms.MessageBox]::Show("Report saved:`n$($sfd.FileName)`n`nSessions CSV:`n$csvPath", 'Export Complete',
                 [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
         } catch {
             WriteAppLog 'ERROR' "Export failed: $_"
@@ -2292,6 +2550,32 @@ function Build-MainForm {
         $form.Cursor = [System.Windows.Forms.Cursors]::Default
     }.GetNewClosure()
     $miExport.Add_Click($doExport); $tbExport.Add_Click($doExport)
+
+    # ---- Export Tree ----
+    $doExportTree = {
+        if ($Global:Sessions.Count -eq 0) { return }
+        $tabIdx = $Global:UI_leftTabs.SelectedIndex
+        $tabName = switch ($tabIdx) { 0 { 'Sessions' } 1 { 'EHLO' } 2 { 'TLS' } default { 'Tree' } }
+        $sfd = [System.Windows.Forms.SaveFileDialog]::new()
+        $sfd.Title  = "Export $tabName Tree"; $sfd.Filter = 'HTML Files (*.html)|*.html'
+        $sfd.FileName = "SMTP_${tabName}Tree_$(Get-Date -Format 'yyyyMMdd_HHmmss').html"
+        if ($sfd.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        $form.Cursor  = [System.Windows.Forms.Cursors]::WaitCursor
+        $tbLabel.Text = 'Exporting...'
+        try {
+            Export-TreeHtml -OutputPath $sfd.FileName -TabIndex $tabIdx -Sessions $Global:Sessions
+            $tbLabel.Text = 'Export complete.'
+            WriteAppLog 'INFO' "$tabName tree exported: $($sfd.FileName)"
+            [void][System.Windows.Forms.MessageBox]::Show("Report saved:`n$($sfd.FileName)", 'Export Complete',
+                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        } catch {
+            WriteAppLog 'ERROR' "Tree export failed: $_"
+            [void][System.Windows.Forms.MessageBox]::Show("Export failed:`n$_", 'Error',
+                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        }
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+    }.GetNewClosure()
+    $tbExportTree.Add_Click($doExportTree)
 
     # ---- View Log ----
     $doLog = {
@@ -2323,7 +2607,7 @@ function Build-MainForm {
         $ab_pb.Location = [System.Drawing.Point]::new(20, 18)
 
         $ab_l1  = [System.Windows.Forms.Label]::new()
-        $ab_l1.Text     = 'SMTP Protocol Log Parser v2.0'
+        $ab_l1.Text     = 'SMTP Protocol Log Parser v2.1'
         $ab_l1.Font     = [System.Drawing.Font]::new('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
         $ab_l1.Location = [System.Drawing.Point]::new(20, 86)
         $ab_l1.AutoSize = $true
